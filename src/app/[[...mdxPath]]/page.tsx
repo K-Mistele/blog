@@ -7,6 +7,10 @@ export const generateStaticParams = generateStaticParamsFor("mdxPath");
 export async function generateMetadata(props) {
 	const params = await props.params;
 	const { metadata } = await importPage(params.mdxPath);
+	metadata.title = `${metadata.title} // Kyle's Blog`;
+	metadata.icons = {
+		icon: "/thought-balloon.png",
+	};
 	return metadata;
 }
 
