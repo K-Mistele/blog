@@ -1,0 +1,9 @@
+# *
+User-agent: *
+Allow: /
+
+# Host
+Host: https://blog.blacklight.sh
+
+# Sitemaps
+Sitemap: https://blog.blacklight.sh/sitemap.xml
