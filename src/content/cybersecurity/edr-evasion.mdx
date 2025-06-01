@@ -1,0 +1,56 @@
+---
+title: A Beginner's Guide to EDR Evasion
+description: A beginner's guide to EDR evasion. Learn to bypass Crowdstrike, Defender ATP, & Carbon Black using API unhooking, SysWhispers, and APC Queue Injection for stealthy operations.
+---
+import Image from 'next/image'
+
+# A Beginner’s Guide to EDR Evasion
+
+Or, how to get past Crowdstrike/Defender ATP/Carbon Black on your next engagement
+<br/>
+<Image src='/content/cybersecurity/edr-evasion/b2.webp' alt='' width={800} height={500}/>
+<br/>
+
+In this post, I’m going to cover the process I used to write a shellcode loader to evade industry-leading EDR solutions and successfully run Cobalt Strike undetected on various endpoints during an engagement. This is basically a more in-depth version of a presentation I gave at Dallas Hackers Assocation.
+
+None of the techniques discussed here are new per se. Rather, I took some existing tools and methodologies and combined them to achieve the effect that I wanted.
+
+## What this post is
+In this post, I’m going to cover a variety of topics, including:
+
+* The mechanics of API Hooking
+* Why API unhooking is important, but in this case not necessary
+* Talk about my process and methodology going into this project
+* Go over some of my favorite techniques for evading hooking and performing process injection
+
+## What this post is _not_
+This post is not a tool drop — I am not open-sourcing any of the tooling or code I wrote. This post is entirely theoretical, however, a sufficiently technically skilled reader should be able to recreate something similar to my toolset from the techniques described here. If you’re reasonably skilled with Windows C++, reading documentation, and doing some creative googling, you should have no problem.
+
+Let's dive in.
+
+## Windows API Hooking
+Windows API hooking is one of the varieties of mechanics that most EDRs use to detect malicious behavior, and in particular, process injection. In order to bypass this type of detection, it’s very important to understand what API hooking is, how it works, and how to undo (“unhook”) it.
+
+### Important Concepts
+For the purposes of the rest of this post, it will help to think of a **function** as a **pointer to a routine in memory**. This routine is defined by a series of assembly instructions, which will vary depending on the processor architecture. These assembly instructions are several-byte opcodes.
+
+The Windows API is the interface through which we can programmatically access and manipulate system resources such as processes, threads, memory, and so forth. It is provided by a series of header files ( `.h` files in C++) that export various types and functions. The interface looks a little different in C#, but the underlying concepts are functionally the same.
+
+The most common header to import is `Windows.h`, but depending on the resources that we’re accessing and manipulating, we may import a variety of other headers such as `processthreadsapi.h`, or `memoryapi.h`. More information on headers like these can be found in the [Windows Documentation](https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/).
+
+**API Hooking** refers to a technique used by EDRs and other programs such as anti-cheat engines to redirect the flow of program execution when a certain function is called. When a hooked function is called, execution is redirected by the “hook” to some routine in a library that has been loaded into the process, before eventually returning to the normal flow of execution or terminating the call. Methods for this vary — some will be discussed further on in this post.
+
+### How the Windows API Works
+When a user makes a call to one of the functions exported by the system header files that make up the Windows API, execution jumps into the Windows library that the header is defining exports from. This library does some sanity checks, validation, and type conversions, and then will call an _unexported_ function in `NTDLL.dll`, `kernel32.dll`, or another system linked library. This function will then set up the appropriate registers with the correct syscall number before executing the `syscall` instruction that jumps from user-mode into kernel-mode.
+
+It’s worth noting that the register values (parameters) that are set up and the syscall number actually vary from windows version to windows version, and even among various service packs and patch levels across the same windows version.
+
+Here’s an example of the normal execution flow for the Windows API call `CreateRemoteThread` .
+
+<br/>
+<Image src='/content/cybersecurity/edr-evasion/createremotethread.png' alt='' width={800} height={500}/>
+<br/>
+
+First, the user imports the `processthreadsapi.h` header and calls `CreateRemoteThread` with the correct parameters. This function will do the sanity checks and so forth, and then it will call the unexported `NtCreateThreadEx` function in `NTDLL.dll`. This function will then set up the appropriate registers with parameters and the syscall number before executing the `syscall` instruction to jump into kernel-mode. Once the kernel-mode syscall is done executing, execution will return to userland and eventually back to the caller.
+
+

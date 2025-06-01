@@ -2,7 +2,7 @@ import nextra from "nextra";
 
 // Set up Nextra with its configuration
 const withNextra = nextra({
-	contentDirBasePath: "/blog",
+	contentDirBasePath: "/",
 	defaultShowCopyCode: true,
 	codeHighlight: true,
 	latex: true,
