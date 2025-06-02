@@ -1,8 +1,12 @@
 {
-  "cybersecurity": 1,
+  "cybersecurity": 2,
   "malware": 1,
   "evasion": 1,
-  "windows": 1,
+  "windows": 2,
   "operating-systems": 1,
-  "internals": 1
+  "internals": 1,
+  "networking": 1,
+  "cryptography": 1,
+  "passwords": 1,
+  "post-exploitation": 1
 }
