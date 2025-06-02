@@ -1,5 +1,11 @@
 {
-  "cybersecurity": 2,
+  "ai": 1,
+  "vllm": 1,
+  "open-source": 1,
+  "agents": 1,
+  "llms": 1,
+  "inference": 1,
+  "cybersecurity": 3,
   "malware": 1,
   "evasion": 1,
   "windows": 2,
@@ -7,6 +13,6 @@
   "internals": 1,
   "networking": 1,
   "cryptography": 1,
-  "passwords": 1,
-  "post-exploitation": 1
+  "passwords": 2,
+  "post-exploitation": 2
 }
