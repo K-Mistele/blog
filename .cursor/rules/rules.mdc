@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Rules
+1. When you are asked to complete a task, always thoroughly search the codebase to make sure you understand the structure and implementation of the relevant parts. You should be as thorough as possible, but once you have completed this don't keep searching unless you're positive that you need more information.
+2. You should keep your responses as concise as reasonably possible. Don't be curt, but don't be long-winded. Opt for high information density.
+3. When you are askd to make a change, add a feature, or fix something, make the minimal amount of changes as possible. do NOT make unnecessary changes or reformats such as altering spacing, lines, semicolons, or other stylistic changes that are unrelated to the task you have been asked to complete. Do not alter function signatures or implementations or variable names or do other refactoring unless it is directly necessary for your task.

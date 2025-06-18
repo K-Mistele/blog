@@ -8,8 +8,7 @@ const siteMetadata = {
 	theme: "system", // system, dark or light
 	siteUrl: "https://blacklight.sh",
 	siteRepo: "https://github.com/k-mistele/blog",
-	siteLogo: `${process.env.BASE_PATH || ""}/static/images/blacklight.png`,
-	socialBanner: `${process.env.BASE_PATH || ""}/static/images/twitter-card.png`,
+	siteLogo: `${process.env.BASE_PATH || ""}/static/favicons/android-chrome-512x512.png`,
 	email: "kmistele@protonmail.com",
 	github: "https://github.com/K-Mistele",
 	x: "https://x.com/0xblacklight",
