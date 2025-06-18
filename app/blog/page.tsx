@@ -1,28 +1,56 @@
-import { allCoreContent, sortPosts } from 'pliny/utils/contentlayer'
-import { allBlogs } from 'contentlayer/generated'
-import { genPageMetadata } from 'app/seo'
-import ListLayout from '@/layouts/ListLayoutWithTags'
+import siteMetadata from "@/data/siteMetadata";
+import ListLayout from "@/layouts/ListLayout";
+import { allBlogs } from "contentlayer/generated";
+import type { Metadata } from "next";
+import { allCoreContent, sortPosts } from "pliny/utils/contentlayer";
 
-const POSTS_PER_PAGE = 5
+const title = "Kyle's Blog";
+const description = "All posts from Kyle, sorted by date.";
+const imageUrl = `${siteMetadata.siteUrl}/api/og?title=${encodeURIComponent(title)}`;
 
-export const metadata = genPageMetadata({ title: 'Blog' })
+export const metadata: Metadata = {
+	title: title,
+	description: description,
+	openGraph: {
+		title: title,
+		description: description,
+		images: [
+			{
+				url: imageUrl,
+				width: 1200,
+				height: 630,
+				type: "image/png",
+			},
+		],
+	},
+	twitter: {
+		card: "summary_large_image",
+		title: title,
+		description: description,
+		images: [imageUrl],
+	},
+};
 
-export default async function BlogPage(props: { searchParams: Promise<{ page: string }> }) {
-  const posts = allCoreContent(sortPosts(allBlogs))
-  const pageNumber = 1
-  const totalPages = Math.ceil(posts.length / POSTS_PER_PAGE)
-  const initialDisplayPosts = posts.slice(0, POSTS_PER_PAGE * pageNumber)
-  const pagination = {
-    currentPage: pageNumber,
-    totalPages: totalPages,
-  }
+const POSTS_PER_PAGE = 5;
 
-  return (
-    <ListLayout
-      posts={posts}
-      initialDisplayPosts={initialDisplayPosts}
-      pagination={pagination}
-      title="All Posts"
-    />
-  )
+export default function Page() {
+	const posts = allCoreContent(sortPosts(allBlogs));
+	const pageNumber = 1;
+	const initialDisplayPosts = posts.slice(
+		POSTS_PER_PAGE * (pageNumber - 1),
+		POSTS_PER_PAGE * pageNumber,
+	);
+	const pagination = {
+		currentPage: pageNumber,
+		totalPages: Math.ceil(posts.length / POSTS_PER_PAGE),
+	};
+
+	return (
+		<ListLayout
+			posts={posts}
+			initialDisplayPosts={initialDisplayPosts}
+			pagination={pagination}
+			title="All Posts"
+		/>
+	);
 }

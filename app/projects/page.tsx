@@ -1,8 +1,34 @@
 import Card from "@/components/Card";
 import projectsData from "@/data/projectsData";
-import { genPageMetadata } from "app/seo";
+import siteMetadata from "@/data/siteMetadata";
+import type { Metadata } from "next";
 
-export const metadata = genPageMetadata({ title: "Projects" });
+const title = "Kyle's Projects";
+const description = "Kyle Mistele's Projects";
+const imageUrl = `${siteMetadata.siteUrl}/api/og?title=${encodeURIComponent(title)}`;
+
+export const metadata: Metadata = {
+	title: title,
+	description: description,
+	openGraph: {
+		title: title,
+		description: description,
+		images: [
+			{
+				url: imageUrl,
+				width: 1200,
+				height: 630,
+				type: "image/png",
+			},
+		],
+	},
+	twitter: {
+		card: "summary_large_image",
+		title: title,
+		description: description,
+		images: [imageUrl],
+	},
+};
 
 export default function Projects() {
 	return (

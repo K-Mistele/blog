@@ -71,7 +71,7 @@ export async function generateMetadata(props: {
 			card: "summary_large_image",
 			title: post.title,
 			description: post.summary,
-			images: [imageUrl],
+			images: [{ url: imageUrl }],
 		},
 	};
 }
@@ -104,7 +104,7 @@ export default async function Page(props: {
 	});
 	const mainContent = coreContent(post);
 	const jsonLd = post.structuredData;
-	jsonLd["author"] = authorDetails.map((author) => {
+	jsonLd.author = authorDetails.map((author) => {
 		return {
 			"@type": "Person",
 			name: author.name,
