@@ -43,6 +43,7 @@ export async function generateMetadata(props: {
 	const modifiedAt = new Date(post.lastmod || post.date).toISOString();
 	const authors = authorDetails.map((author) => author.name);
 	const imageUrl = `${siteMetadata.siteUrl}/api/og?title=${encodeURIComponent(post.title)}`;
+	const postUrl = `${siteMetadata.siteUrl}/blog/${slug}`;
 
 	return {
 		title: post.title,
@@ -55,7 +56,7 @@ export async function generateMetadata(props: {
 			type: "article",
 			publishedTime: publishedAt,
 			modifiedTime: modifiedAt,
-			url: "./",
+			url: postUrl,
 			images: [
 				{
 					url: imageUrl,
