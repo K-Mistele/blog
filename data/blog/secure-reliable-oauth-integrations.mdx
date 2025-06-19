@@ -1,0 +1,417 @@
+---
+title: 8 Key Components of Secure & Reliable OAuth Integrations
+summary: "Building OAuth integrations is quite complicated and can be migraine-inducing - specifics vary between implementations, and security is easy to get wrong. In this article, I walk through what you need to make sure you're thinking about."
+tags: ['OAuth', 'cybersecurity', 'cryptopgraphy', 'SaaS']
+date: 06/18/2025
+draft: false
+---
+
+## The OAuth Challenge
+I recently spent several weeks implementing OAuth flows for an [OAuth-related project](https://onedollaroauth.com), and I was struck by how much complexity is hidden beneath the surface. What looks like a simple authorization flow in theory requires building and maintaining at least eight distinct components - and many of these components differ for each OAuth provider you want to support.
+
+In this article, I'm going to walk you through the surprisingly complex world of OAuth integrations. If you've ever tried to implement an OAuth flow from scratch, you know it's not as simple as the diagrams make it seem. There are numerous moving parts, security considerations, and provider-specific quirks that can make this seemingly straightforward task a genuine headache.
+
+Worth clarifying: in this article, I'm not concerned with using OAuth (or more specifically [OpenID Connect](https://openid.net/developers/how-connect-works/), also known as OIDC) for user _authentication_ – that can be easily handled with solutions like [Better Auth](https://better-auth.com) and similar. What I'm concerned with is actually building _integrations_ with OAuth apps so that you can use their APIs to do things, like sending messages in Slack or retrieving documents from Google Drive.
+There are a different set of considerations that these types of integrations imply.
+
+Also, for the purposes of this article, we're primarily concerned with the OAuth [Authorization Code Flow](https://datatracker.ietf.org/doc/html/rfc6749#section-1.3.1). There are other OAuth flows like the [Implicit Flow](https://oauth.net/2/grant-types/implicit/), but this is the one that you will most-commonly use as it is more secure than the implicit flow.
+
+
+Let's break down these components one by one, and I'll share some code examples and lessons learned along the way.
+
+## Overview the Authorization Code Flow
+Before we get into the components you'll need to build, let's do a quick overview of the Authorization code flow. Generally, there are five entities that are party to an Authorization code flow:
+1. The user 
+2. The user's browser
+3. Your application
+4. The OAuth Authorization server that handles granting tokens
+5. The Resource server which the authorization server's tokens grant access to
+
+Now, don't worry if you don't know what all the terms here are - we'll get to them below! Here's how it works:
+
+1. **Access (User) –** Ther user clicks a button in your app that's in their browser to initiate the OAuth flow to connect an app
+2. **Request Authorization (Your application) –** Your app generates a URL to the Authorization server's **authorization endpoint** which includes a bunch of information including your client ID, a redirect URL, the `response_type` set to `code` to indicate we're using the Authoriztaion Code flow, and the requested scopes – along with other optional fields like `state`, or provider-specific fields. The user is redirected to this URL at the authorization server in their browser, which requests authorization from the authorization server
+3. **Display Consent (Authorization Server) –** The authorization server (e.g. Google's OAuth server) will ask the user if they want to authorize your app (identified by its client ID) to access whatever permissions and resources are specified by the scopes. 
+5. **Give Consent (User) –** The user can give consent for (_authorize_) your app to access the requested resources identified by the scopes by clicking a button.
+6. **Issue Authorization Code (Authorization server) –** The Authorization server will redirect the user's browser to your applications's **redirect URL** with _either_ query parameters including a `code` which is the Authorization code and the `state` specified in step (2), or an `error` indicating that an error occured. Note that the authorization code is an opaque token.
+7. **Request Access Token (your application) –** Once your application receives the authorization code (and the `state`), it should make a POST request from the **backend** to the Authorization server's **token endpoint** with your application's client ID and client secret, the authorization code from the previous step, the original redirect URL, and optionally other provider-specific fields. 
+8. **Issue Access Token (Authorization server) –** If everythign is in order your application will receive a response containing _at minimum_ an `access_token` and a `token_type`. It may also receive an `expires_in` field (in _seconds_, not milliseconds) denoting when the access token expires, and a `refresh_token` which does not expire, which may be used to obtain a new, unexpired access token.
+
+The access token can then be included in requests from your application to a resource server which trusts the authorization server (e.g. how the Google docs API trusts the Google OAuth authorization server) to take actions which are authorized by the scopes which were granted after being requested.
+
+
+
+## The 8 Critical Components of OAuth Integrations
+With this understanding in mind, let's break down what you actually have to build in order to ship an OAuth integration.
+
+### 1. Client Credentials Management
+
+Every OAuth integration requires a client ID and client secret. There's simply no way around this unless you're using someone else's credentials (which, as I'll explain, is a terrible idea).
+The Client ID and Client Secret are collectively referred to as your "Client Credentials".
+
+I've seen some developers use integration platforms like Pipedream or Composio that let you use their OAuth credentials. This is a recipe for disaster. If their credentials get compromised or restricted (perhaps because another user on their platform is misbehaving), your application will suddenly stop working. Always get your own client credentials.
+
+Usually, you can do this from your OAuth Provider's dashboard, for example under "OAuth Applications" which is under "Developer Settings" under your profile settings in Github, or under the OAuth Apps section of the Google Cloud dashboard.
+
+Some providers will require additional configuration once you obtain your app and create your client credentials. For example, Slack makes you configure at least one scope.
+
+Once you have these, you'll need to pass them to your application. Using a dedicated secrets manager is the best option, and using environment variables is next-best. But **never, ever hard-code these values in your source code or track them in version control**.
+
+```typescript:secrets.ts showLineNumbers
+// BAD:
+const GOOGLE_CLIENT_ID = 'abcdef'
+const GOOGLE_CLIENT_SECRET = 'xyz123'
+
+// BETTER:
+const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET} = process.env
+
+// BEST:
+// (prevent downstream errors from missing values):
+const requireEnvironment = (variableName: string): string => {
+  const value: string | undefined = process.env[variableName]
+  if (value) return value
+  const msg = `Environment Variable ${variableName} is not in the process environment!`;
+  console.error(msg)  // capture this in logging and telemetry.
+  throw (err)         // we treat this as an un-recoverable error. 
+}
+
+const GOOGLE_CLIENT_ID = requireEnvironment('GOOGLE_CLIENT_ID')
+const GOOGLE_CLIENT_SECRET = requireEnvironment('GOOGLE_CLIENT_SECRET')
+```
+
+### 2. Building a Callback URL Handler
+
+When you redirect users to the provider's authorization URL, they'll eventually be redirected back to your application with an authorization code. You need to build an endpoint to handle this callback.
+
+Note that you should probably start by defining the route in your app but stubbing out the contents so that you can configure the URL in the OAuth provider's dashboard as a valid redirect URL for your application, since most providers require you to provide a whitelist of these.
+
+```typescript:app.ts showLineNumbers
+import express, { type Request, type Response, type NextFunction } from 'express';
+
+
+interface OAuthCallbackQueryParams {
+  code?: string;
+  state?: string;
+  error?: string;
+}
+
+interface OAuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
+app.get('/oauth/callback/google', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { code, state } = req.query as OAuthCallbackQueryParams;
+    
+    // Verify state to prevent CSRF (more on this later) and load other information from the state.
+    if (!await verifyOAuthState(state)) {
+      return res.status(400).send("Invalid state parameter");
+    }
+    
+    // Exchange the code for tokens (next step)
+    const tokens: OAuthTokenResponse = await exchangeCodeForTokens(code!);
+    
+    // Store tokens securely
+    await storeTokensForUser(req.user.id, tokens);
+    
+    return res.redirect('/dashboard');
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    return res.status(500).send('OAuth callback failed');
+  }
+});
+```
+
+
+Note that aside from the `error` or `state` and `code` parameters, some OAuth providers will include additional parameters. 
+
+### 3. Initiating the OAuth Flow
+Once you have a callback / redirect URL to receive the Authorization Code from the authorization server, you can initiate the OAuth flow for a user by redirecting the user to the Authorization Server's authorization URL with your client ID, redirect URL, list of requested scopes, and state value.
+
+Some providers require or allow you to add additional query parameters with their own semantics (like Google).
+
+
+```typescript:create-authorization-url.ts showLineNumbers
+const baseUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
+
+// the redirect URI must be an absolute URL
+const redirectUri = `${requireEnvironment('APPLICATION_BASE_URL')}/oauth/callback/google`
+
+// Scopes are usually things like 'channels:read' but other providers treat them like URLs. 
+const scopes = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file'
+]
+
+// Optional; more on this later.
+const state = generateState(userId)
+
+const url = new URL(baseUrl)
+url.searchParams.set('client_id', clientId)
+url.searchParams.set('redirect_uri', redirectUri)
+url.searchParams.set('state', state)
+
+// Denotes authorization code flow
+url.searchParams.set('response_type', 'code')     
+
+// Some providers use space-separation, others use `+` or `,`
+url.searchParams.set('scope', scopes.join(' ')) // Use space separation for Google OAuth
+
+// Google-specific fields
+url.searchParams.set('access_type', 'offline') // Request refresh token
+url.searchParams.set('prompt', 'consent') // Force consent to ensure refresh token
+
+const authorizationUrlForUser = url.toString()
+```
+
+Once you have an authorization URL for the user with all the correct query parameters, you should redirect the user to it.
+
+URL construction will vary for each provider depending on their base URL, scope separation conventions, and any additional required or optional query parameters.
+
+### 4. Authorization Code Exchange
+Once the user is redirected to the authorization URL and grants consent, they will be redirected back to that callback URL / redirect URL with the `state` parameter you specified, and the `code` (the authorization code).
+
+Once you have the authorization code, you need to exchange it for an access token. 
+
+```typescript:exchange.ts showLineNumbers
+const GOOGLE_CLIENT_ID = requireEnvironment('GOOGLE_CLIENT_ID')
+const GOOGLE_CLIENT_SECRET = requireEnvironment('GOOGLE_CLIENT_SECRET')
+
+interface GoogleTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+  id_token?: string;
+}
+
+async function exchangeGoogleAuthCode(code: string, redirectUri: string): Promise<GoogleTokenResponse> {
+  try {
+    const data = new FormData()
+    formData.append('grant_type', 'authorization_code')
+    formData.append('code', code)
+    formData.append('redirect_uri', redirectUri) // the origiunal redirect URI you specified in the authorization URL
+    formData.append('client_id', GOOGLE_CLIENT_ID)
+    formData.append('client_secret', GOOGLE_CLIENT_SECRET)
+
+
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const {
+      access_token,
+      expires_in, 
+      refresh_token,
+      token_type,
+      ...metadata
+    } = await response.json()
+
+    // Note: you will want to save all of this information
+    await saveAllThisInformation({access_token, expires_in, refresh_token, token_type, metadata})
+
+    // TODO - something that makes sense for your application. redirect them to the dashbord and show a toast or something.
+  } catch (error) {
+    console.error('Error exchanging auth code:', error);
+    throw error;
+  }
+}
+```
+
+Here's an example of making that request in cURL for the non-typescript users:
+```bash
+curl -X POST https://oauth2.googleapis.com/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "code=YOUR_AUTH_CODE" \
+  -d "client_id=YOUR_GOOGLE_CLIENT_ID" \
+  -d "client_secret=YOUR_GOOGLE_CLIENT_SECRET" \
+  -d "redirect_uri=https://your-app.com/oauth/callback/google" \
+  -d "grant_type=authorization_code"
+```
+
+There are lots of "gotchas" here: 
+
+1. **Content types**: different OAuth providers will require & support different content types for token exchanges (and token refreshes). The most common one, shown in the specification, is `application/x-www-form-urlencoded`. However, some providers support / require other formats, including `application/json` and `multipart/form-data`. When I was implementing this flow for a number of different OAuth providers, I ran into all three of these for request content types, though most by default returned responses as `application/json`. But watch out for this! _Each provider may do it differently_
+2. **Access token lifespan**: at a minumum, an OAuth provider should return an `access_token` and `token_type` field, named as such. If this is all you receive, it's often the case that the access token doesn't expire. If the access token expires, the provider may also return an `expires_in` field (in seconds, not milliseconds! That's a common gotcha.) and optionally a `refresh_token` which is a long-lived or non-expiring token that can be used to obtain a new access token once the current one expires. Some providers like Linear issue super-long-lived access tokens (e.g., 10 years), effectively punting on the refresh token mechanism. 
+3. **Additional content**: Many OAuth providers will provide _additional_ fields that contain provider-specific metadata, or things which pertain to various OAuth extensions.
+
+All of these need to be handled correctly on a per-provider basis!
+
+### 5. Token Refresh Management
+
+Most access tokens expire, which means you need to track when they expire and refresh them when needed. This requires storing refresh tokens securely and implementing a token refresh mechanism.
+
+Usually, refreshing an access token involves making a `POST` request to the same token endpoint as in the token exchange, and requires providing your Client ID, Client Secret, the `grant_type` set to `refresh_token`, and the refresh token for the user whose access token you want to refresh. In most cases, providers use the `application/x-www-form-urlencoded` content type, but your mileage may vary as previously noted. Make sure to consult the docs.
+
+```typescript:refresh.ts
+// TypeScript example for token refresh
+interface RefreshTokenRequest {
+  refresh_token: string;
+  client_id: string;
+  client_secret: string;
+  grant_type: 'refresh_token';
+}
+
+interface RefreshTokenResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+  token_type: string;
+}
+
+async function refreshGoogleAccessToken(refreshToken: string): Promise<{
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+}> {
+  try {
+    const params = new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: requireEnvironment('GOOGLE_CLIENT_ID'),
+      client_secret: requireEnvironment('GOOGLE_CLIENT_SECRET')
+      grant_type: 'refresh_token'
+    });
+
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      body: params.toString(),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      }
+    })
+    
+    const { 
+      access_token, 
+      expires_in, 
+      token_type, 
+      refresh_token
+    }: RefreshTokenResponse = await response.json()
+    // todo: save this information!
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    throw error;
+  }
+}
+```
+
+```bash
+# cURL example for Google OAuth token refresh
+curl -X POST https://oauth2.googleapis.com/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "refresh_token=YOUR_REFRESH_TOKEN" \
+  -d "client_id=YOUR_GOOGLE_CLIENT_ID" \
+  -d "client_secret=YOUR_GOOGLE_CLIENT_SECRET" \
+  -d "grant_type=refresh_token"
+```
+
+You can either proactively refresh access tokens as soon as they expire, or you can refresh them on-demand when a user needs them and you find that they're expired – just know that doing so will create additional latency.
+
+Once again, different OAuth providers handle this exchange differently. Some give you only `access_token` and `expires_in` and `token_type`. Others will give you a **new** refresh token as well, depending on additional fields you can add to the request.
+Still others will give you additional metadata. 
+
+### 6. Scope Management
+
+When your application requests user authorization, it must provide a list of scopes that it is asking for to the Authorization Server in the `scope` query parameter to the authorization URL. Usually, you will specify a list of scopes as a single string, concatenated by spaces, commas, `+` signs, or something similar. 
+
+There are no "standard scopes" in OAuth - the list of possible scopes you may request depends completely on the OAuth provider and their services and system architecture. (There are, however, [standard scopes for OpenID Connect](https://openid.net/specs/openid-connect-basic-1_0.html#Scopes)).
+Some OAuth providers' scopes look like simple words: `channels`, `emails`, etc.
+
+Others are more narrow and hierarchical: `channels:read`, `im:read`, `im:write`, and so forth.
+
+And still others model them as URLs: `https://www.googleapis.com/auth/drive.file`, `https://www.googleapis.com/auth/cloud-platform.read-only`
+
+Your application needs a list of the scopes that you want to request from the provider when you initiate the OAuth flow. 
+
+Based on the scopes you're requesting, the Authorization server will usually display information about what privileges you're requesting (which are entailed by the scopes) to the user on the consent prompt. 
+
+Some providers then _only_ give the user the option to approve or reject the authorization request. Others will allow the user to check boxes or otherwise select which permissions that you have requested they would like to grant. Still others allow you to specify a list of "required scopes" that your app needs to function, and "optional scopes" that you would like but which the user can choose not to grant while still authorizing your app for the required scopes. 
+
+In these cases, the provider may return to you a list of scopes (in their own format, providers don't really follow a standardized way of doing this) in the response to the access token exchange or token refresh request, that indicates which scopes out of the ones that you requested your access token has actually been granted.
+
+In these cases, depending on your application, you may need to track which scopes you have been granted and which APIs / resources you are and are not able to use on the resource server based on the granted scopes. 
+
+Obviously, this can get messy quickly when you're implementing lots of different providers.
+
+### 7. State Parameter and CSRF Protection
+
+So earlier, we mentioned but skipped over the `state` parameter. "What is it, and why should I care about it if it's optional?", you might ask.
+
+Great question. The `state` parameter is a **security feature which is used to prevent Cross-Site Request Forgery (CSRF) attacks, and which providers other benefits:
+
+**Purpose & Functionality**:
+
+1. **CSRF Protection:**
+  - When your application initiates the authorization code flow, the backend should generate a unique, random (sufficiently-long so as to be secure) `state` value, and include it in the authorization server URL redirect. 
+  - The state value should then also be set as a CSRF cookie (make sure to set the `SameSite` property to `lax`! Otherwise it won't work since Cookies with a `strict` `SameSite` property aren't included on requests that result from cross-domain redirects; which the callback is)
+  - The authorization server will include that same `state` value as a query parameter in the redirect to your callback URL after the user grants consent. 
+  - Your callback URL handler should **verify** (a) that your server issued this state value, and (b) that the value in the URL matches the value in the CSRF cookie.
+  - If they don't match, the client should reject the response, to prevent unauthorized or tampered-with responses and session hijacking attacks.
+2. **Session Correlation**:
+  - When your application creates a state value, it can store it in the database and associate it with the currently-authorized user, and with other relevant information.
+  - The `state` value can then be used to correlate the callback with the initial redirect to the authorization URL. This is useful in scenarious where there are multiple users or sessions in the same brrowser at the same time.
+  - It can ensure that the response is processed in the context of the correct user session.  
+3. **Optional Data**:
+  - in your database , you can associate information with the token such as the URL in your application that you want the end-user to be redirected to after the callback is processed. 
+  - it can be used to maintain other application context; however it should be an **opaque** token since it may be exposed in logs. 
+
+
+**How it works**:
+1. Your application securely generates the `state` value on the backend before redirecting the user to the Authorization Server's authorization URL.
+2. (Optional) Your application may store the token in its' database with optional contextual information as mentioned above.
+3. Your application should set it as a cookie in the user's browser _before_ redireting them to the authorization server's authorization URL.
+4. Your application should include the value as the `state` query parameter on the authorization URL that the user is redirected to.
+5. When your users receives the callback redirect from the authorization server, check the `state` value to confirm that it's present, and that it matches the contents of the cookie you set.
+6. (optional) retrieve contextal application information and use it 
+
+Generally, you should follow the following best practices for state:
+* **Unique**: The `state` value should be unique for every authorization request
+* **Random**: It should be securely random - i.e. of sufficient length and complexity that it is infeasible to guess. 
+* **Secure storage**: Set the `state` value as a `HttpOnly` cookie (make sure to set `SameSite` to `lax` - `strict` won't work!)
+* **No sensitive data**: Avoid including any sensitive information in the token itself - any application-specific contextual information should be stored in the database in a manner that's assoicated with the token. Don't use signed JWTs or something which may expose information.
+* **Always use it**: While the `state` parameter is an _optional_ part of the specification, it's strongly recommended to use it to enhance your application's security.
+
+### 8. Secure Token Storage
+Using access tokens for user authentication through a library like [Better-auth](https://better-auth.com) where you're requesting non-highly-sensitive scopes like `openid`, `email`, and `profile` through OpenID Connect is one thing. You should still care about these tokens (they give you PII!), but you would be storing these unencrypted in your database. 
+
+But if you're building OAuth integrations, in many cases you're doing it so that your application can access your users' information in other systems – things like files, emails, contacts, or accounting and payroll information, financial information, CRM, helpdesk tickets, or other software systems.
+
+In these cases, you should think of access tokens as **API Keys** that give you access to sensitive information, resources, and systems _on the user's behalf_. The security considerations of this model are **completely different** from user authentication with OpenID Connect. 
+
+Similarly to how you (hopefully) wouldn't store your users' passwords or API keys unhashed in a database, you shouldn't store your users' sensitive access tokens unencrypted. 
+
+Now you may be thinking, "My database provider users encryption-at-rest! I'm already doing this."
+
+**And you would be wrong**
+
+Unless your threat model is someone walking into your cloud provider's datacenter and pulling out the hard drive that your database lives on and walking out with it, **encryption at rest is security theatre**. Encryption at rest does not prevent most database compromises, and does not secure information from software hacks.
+
+So what should you do? The simple answer is **field-level encryption** - securely encrypt access tokens before inserting them into the database, and decrypt them after you retrieve them from the database when you need to make an API call. Here's a [great example](https://drizzle-encryption.vercel.app/) of how to do this with [Drizzle ORM](https://orm.drizzle.team), which can be generalized to other frameworks and languages. 
+
+This will prevent someone who gets access to your database from stealing all of the access tokens, unless they are able to separately compromise your application's encryption key. 
+
+Personally, I really like using [Evervault](https://evervault.com) - they have a great drop-in relay-based solution that requires minimal code changes (just an encrypt-only API key and relay URLs) and which means that you don't ever have to manage keys. Evervault manages keys and encryption/decryption operations, while you manage business logic and encrypted data. 
+This separation of concerns means that even if your application is entirely compromised, an attacker can't decrypt your data, since all they would get is encrypted data and an encrypt-only API key. And if evervault were compromised, the attacker would only get keys - not encrypted data. You would both have to be compromised for your data to be stolen.
+
+(Note: I do not work for Evervault, and this is not a paid promotion - I just really like their solution!)
+
+## Conclusion
+
+Building OAuth integrations is significantly more complex than it initially appears. You need to implement and maintain at least eight distinct components, many of which differ for each provider you support:
+
+1. Client credentials management
+2. Callback URL handling
+3. Initiating the OAuth flow
+4. Authorization code exchange
+5. Token refresh management
+6. Scope management
+7. State parameter and CSRF protection
+8. Secure token storage
+
+This complexity is why many developers turn to OAuth libraries or integration platforms. However, even with these tools, you still need to understand the underlying mechanics to debug issues and ensure you're implementing everything securely.
+
+Have you implemented OAuth in your applications? What challenges did you face? Let me know in the comments below!
+
+P.S.: we built [One Dollar OAuth](https://onedollaroauth.com) to solve all of this complexity for you for just $1 per application! Check it it out at [OneDollarOauth.com](https://onedollaroauth.com).

@@ -7,6 +7,14 @@ interface Project {
 
 const projectsData: Project[] = [
 	{
+		title: "One Dollar OAuth",
+		description:
+			"The simple, secure and cheap way to connect your SaaS app or agent to all the integrations you need! Just $1 per app per month; unlimited users!",
+		imgSrc: "/static/images/onedollaroauth.png",
+		href: "https://onedollaroauth.com",
+	},
+
+	{
 		title: "Voice Agent Platform",
 		description: `The easiest way to build and deploy voice agents to answer phone calls. Built with Next.js, RabbitMQ, and Livekit, 
     featuring the best-available LLMs, TTS, SST, and EOU detection.`,
