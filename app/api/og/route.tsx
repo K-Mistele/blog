@@ -40,9 +40,11 @@ export async function GET(req: NextRequest) {
 				tw="flex flex-col flex-grow antialiased relative overflow-hidden m-[36px]"
 				style={{}}
 			>
-				<p tw=" text-[32px] mb-[32px] font-extrabold">{name}</p>
-				<p tw="text-[72px] text-purple-500 font-black">{blogSite}</p>
-				<p tw="text-[40px] text-white mt-auto font-semibold">{postTitle}</p>
+				<div tw="flex flex-col mb-36">
+					<div tw="text-[32px] font-extrabold">{name}</div>
+					<div tw="text-[72px] text-purple-500 font-black">{blogSite}</div>
+				</div>
+				<div tw="text-[40px] text-white font-semibold">{postTitle}</div>
 			</div>
 		</div>,
 		{
