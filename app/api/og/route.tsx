@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
 				flexDirection: "column",
 				fontFamily: "Geist",
 				position: "relative",
+				padding: "36px",
 			}}
 		>
 			<div
