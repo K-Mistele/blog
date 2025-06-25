@@ -1,0 +1,202 @@
+---
+title: "\"Do Not Vibe Code in Production\": Lessons from Vibe Coding a Native MacOS App"
+date: 6/23/2025
+tags: ['ai', 'open-source', 'software-engineering']
+draft: false
+summary: "I decided to \"Vibe Code\" a port monitor app that lives in my Mac's menu bar, and I learned lots of lessons along the way like \"How to debug corrupted system caches\" and \"How to boot a M3 Macbook Pro into safe mode\". Featuring hot takes on vibe coding."
+---
+
+I've been a Cursor user for a few months now, so people are generally surprised when I tell them that I've never "vibe coded" anything. 
+
+Of course, I'm distinguishing between "Vibe Coding" and "AI Augmented Development". 
+
+To my mind, **vibe coding** can be thought of as describing a desired outcome and letting the agent figure out how to get there. 
+Generally speaking it's quite hands-off, and is usually used by non-technical individuals, or by technical ones on projects where "the software should work very well" is not a key design requirement.
+
+Consider the following example:
+<div className='w-full flex flex-row items-center justify-center'>
+    ![Claude](/static/content/vibe-coding/vibe-coding.png)
+</div>
+
+I'd contrast this with **AI augmented development** which entails roughly treating the agent as a technical intern that you have to...
+
+* manage very closely
+* give constant instructions not just about what to build, but how to build it
+* present useful context and resources that will be helpful
+* prevent it from breaking things
+* correct obvious and occasionally stupid mistakes
+
+This is a much more _hands-on_ approach that still gives you incredible efficiency gains. In fact, I'd argue it makes you _more_ efficient than "hands-off" vibe coding because you spend less time going down rabbit holes, less, time debugging stuff that Cursor can't figure out, and more time working with better-quality code since the model has the context it needs to build what you want.
+
+Obviously this is a spectrum and not a binary classification, and most people end up somewhere in the middle on this.
+This post describes an attempt at "pure vibe coding" - I have never manually edited the Swift code base. 
+
+## Motivation and Scope
+I decided to build a Port monitor application to list my open ports to find (and kill!) the processes that are using them **primarily** because I got tired of trying to track down the Next.js / Tanstack / Hono / Express development servers across 6 different Cursor windows that were using specific ports when I needed to use the port for something else.
+
+This sounds like not that big of a deal ("You can just change the port your app uses"), but when you're building applications that use OAuth and you have to specify callback URLs and redirect URIs and update whitelisted URIs in different dashboards for each of your apps & Client Credentials, it gets messy and tedious quickly. 
+
+This is the rough scope of what I was trying to build:
+
+1. A native MacOS app that lives in my taskbar, not as a separate window
+2. With its' own icon
+3. That lists listening non-ephemeral TCP ports
+4. And displays basic information about each listening process on hover - memory and CPU usage, executable name, command line
+5. Allows me to hover to see this information for the process's parent in a new dialog
+6. And which does so recursively so I can find the top-level parent process by hovering over PPIDs to open new dialogs
+7. And which for any process at any level in the tree, lets me kill or force-kill the process (great for Zombie dev servers)
+
+## My Approach to Vibe Coding
+I tried to take as hands-off of an approach as possible. With the exception of copying icon files and certificates (which Cursor helped me get and format), I didn't touch the editor at all. I stuck completely to the agent-mode panel and prompting. 
+
+I included some basic Cursor rules at `.cursor/rules` that I have picked up from previous projects which help the agent be a little more active about context discovery:
+
+```markdown:.cursor/rules/instructions.mdc
+# Rules
+1. When you are asked to complete a task, always thoroughly search the codebase to make sure you understand the structure and implementation of the relevant parts. You should be as thorough as possible, but once you have completed this don't keep searching unless you're positive that you need more information.
+2. You should keep your responses as concise as reasonably possible. Don't be curt, but don't be long-winded. Opt for high information density.
+3. When you are askd to make a change, add a feature, or fix something, make the minimal amount of changes as possible. do NOT make unnecessary changes or reformats such as altering spacing, lines, semicolons, or other stylistic changes that are unrelated to the task you have been asked to complete. Do not alter function signatures or implementations or variable names or do other refactoring unless it is directly necessary for your task.
+```
+
+They also avoid some of the pitfalls of using reasoning and "MAX"-mode models which can tend to be over-enthusiastic about editing and refactoring. 
+
+Normally, when I am _not_ vibe coding, I will manually `@mention` files in the agent editor that I know are relevant to include them in context. For this project, I did not do so - I just let the agent try to do the best it could do at context discovery. 
+
+**Every single character that I wrote was a prompt. I wrote exactly zero lines of code.** 
+
+Over the course of the project I...
+
+* told the model (Claude-4-Sonnet, sometimes in MAX mode) what I wanted it to build 
+* did **not** provide suggestions about design or architecture
+* gave the model terminal error output and asked it to debug
+* gave it screenshots of UI errors and asked for fixes. 
+* described changes or features I wanted in terms of _what_ to build, not _how_ to build them.
+* generally took a very hands-off approach.
+
+## The Finished Product
+
+The finished product came out very well! It contains everything I wanted, and works quite well and with reasonably decent performance:
+
+<div className='w-full flex flex-col items-center justify-start gap-8'>
+
+![sc](/static/content/vibe-coding/screenshot.png)
+
+![sc2](/static/content/vibe-coding/screenshot-2.png)
+</div>
+
+I do actually use it all the time, and I find it quite useful. (A "W" for personal software).
+If you're interested in trying it yourself, you can find the source code on [my GitHub](https://github.com/K-Mistele) in the [portlist repository](https://github.com/k-mistele/portlist)
+
+## What Worked 
+The first thing that surprised me about this process was **how quickly I was able to get to a working prototype**.
+
+I know very little about native application development (besides some [Windows malware development expertise](/blog/beginners-guide-edr-evasion)), and Claude was able to bang out the scaffolding and basic app setup _exceptionally_ quickly. 
+
+**I went from zero to a semi-working application in about 15 minutes. That's INSANE.**
+
+All the key features got built, and I have a working app at the end of it; while very little technical expertise was required. That's a really amazing and powerful thing!
+
+Without using any of my technical knowledge I was able to get about 80% of the way to the finished app.
+
+## What Didn't Work
+So now let's talk about what didn't work, and what went poorly (or would have). Like I mentioned, the first 80% was easy. Getting the final 20% of the app completed took an order of magnitude (literally) longer than getting the first 80% done.
+
+### Corrupting System Caches
+Getting claude to try to configure the icon for the app resulted in some shady commands being executed when it was looking for and trying to use system icons. **This resulted in my system icon cache becoming corrupted, and all my Mac's system icons stopped working.**
+
+Rebooting my computer didn't fix the issue; I had to boot it into safe mode to clear the cache and get everything working again. Clearly, **there are dangers to vibe coding and executing commands you don't understand.**
+
+
+### Getting Stuck Down Rabbit Holes
+Another problem I frequently ran into which stems from LLMs' autoregressive nature is that they tend to become stuck in rabbit holes very easily. 
+
+Typically this happens because either
+* They are not capable of solving/implementing something which they **think** that they are capable of to due to invisible or external constraints, or 
+* Because they don't understand the problem well enough but _they don't **know** that they don't understand the problem well enough_
+
+Unless you possess the technical knowledge to _realize_ that you are in a rabbit hole which the agent can't and won't dig itself out of, you are going to spend a very long time and a very large amount of tokens trying to push Sisyphus's boulder up the hill, metaphorically speaking. It's not going to happen. You will spend a massive amount of time and effort and make no progress.
+
+**This is something that non-technical vibe-coders need to be especially aware of**. In many cases the assumptions the model has made or the invisible constraints on the problem are not known by the agent, and if you can't infer what these are or figure them out, you may be in for a rough ride.
+
+<div className='w-[60%] mx-auto'>
+![vibe debugging](/static/content/vibe-coding/debugging.webp)
+</div>
+### Lack of Version Control
+Generally I tended to hit `Cmd+Enter` to approve all of Claude's changes as soon as I verified that something worked well. 
+Claude sometimes made a _lot_ of changes in a single editing session, which I used version control to manage.
+
+I can't speak for every "Vibe coding" tool and product on the market, but generally speaking **These tools do not help or encourage you to use version control, and your project will get irreversibly screwed up at some point if you aren't using it manually.**
+
+On more than once occasion claude produced several hundred- or even once a thousand-plus-line diff by the end of an editing session which _did not work_. If I were not able to go back to previous save points and restore changes, I would never have finished the app.
+
+Cursor does let you go back to a previous message and restore it, but if you're not familiar with cursor's UI or it's hidden dozens and dozens of messages up, this may be challenging.
+
+### Project Size 
+This project was relatively small, so the agent was able to understand it very well and find the context it needed relatively easily. 
+
+However, as it grew, the agent became noticeabley worse at finding the context and information that it needed. For the purposes of this project, I resolved to not manually provide context to the LLM - **being able to manually provide context to the LLM, which requires undestanding the project structure and architecture well, is essential to successfully leverage AI-assisted coding**.
+
+Don't believe me? Believe `r/cursor`, where you can find dozens and dozens of stories _exactly_ like this:
+
+<div className='w-full flex flex-col items-center gap-8'>
+![reddit1](/static/content/vibe-coding/reddit1.png)
+![reddit1](/static/content/vibe-coding/reddit2.png)
+</div>
+
+Despite some frontier LLMs having 128,000-token or even 1,000,000 or 2,000,000-token context windows, it is broadly known that **LLM performance degrades rapidly for complex tasks as context length increases**.
+It is not possible to simply "stuff everything in context" and let the agent figure it out for complex tasks. 
+
+Similary, the larger that the codebase gets, the harder it becomes for you, the vibe coder, to find the right context to present to the agent, and the harder it becomes for the agent to figure it out itself.
+
+### Deployment and Productionization
+It has been broadly observed in software development that the last 20% of the work, which is to make the software production-ready, deployable and so forth constitutes **much more** than 20% of the effort. 
+
+I found that to be far more the case with Vibe Coding. Cursor was able to help me create a production app bundle and `.dmg` installer quite quickly, but it didn't think to sign the app, or sign the installer, or notarize it - all necessary things if you want to meaningfully distribute a MacOS app. 
+
+I happened to know that this was required and was able to prompt Cursor to help with it, and when I asked it was able to work out signing pretty quickly. 
+
+Despite spending 2 hours on it last night, _Cursor and Claude have so far been unable to successfully set up Notarization for the application_, **making distribution problematic for modern Macbooks**.
+And this despite my doing some manual debugging and linking relevant parts of the apple documentation.
+
+### Security issues
+At one point I was struggling to figure out why displaying the command line executable for running processes was only partially working, so I decided to actually look at the source code.
+
+What I discovered was that instead of using system APIs and utilities to accomplish a certain task, Claude had added inline code to call shell commands, capture the output, and then parse it to get information about running ports. 
+
+In doing so, it had _created an arbitrary code execution vulnerability_ by allowing user-inputted fields to be passed to a bash shell without _any_ types of sanity checks, validation or sanitization. Some of these were supplied from fields in other processes, meaning that not only could a _user_ achieve code execution, but another malicious process with a specially-formed command line executable name might be able to.
+
+This is incredibly insecure, and Claude did it without a second thought. If you are hands-off vibe coding, **it is not a question of _if_ security bugs will sneak into your codebase — it's a question of _how many_ bugs and _how severe_** they will be. To give you an idea:
+
+<div className='w-[60%] mx-auto flex flex-col items-center gap-8'>
+![reddit1](/static/content/vibe-coding/security.png)
+</div>
+
+(If you didn't follow this — he was never able to fix the numerous security problems and ended up taking the app offline because the flaws were costing him so much money)
+
+### Performance & Best Practices. 
+This same issue created a number of performance issues, which I was able to solve by telling claude to avoid inlining shell commands and instead use system APIs for these things. 
+
+Generally, Vibe Coding tools are not going to solve a problem in the _most performant_ way - they will solve it in the _easiest_ way that provides the shortest path between where your codebase is right now, and the feature you want to add.
+
+I found that before the fix some processes took 10 seconds that should've taken fractions, which I would not have known how to fix but for [prior experience doing low-level systems programming](/blog/beginners-guide-edr-evasion).
+
+Similarly, Claude happily hard-coded values which should not have been hard-coded and which I only caught down the line when they caused unexpected issues (like accidentally "fork bombing" my mac with `lsof` and `ps` processes).
+
+It did not implement sanity checks, like checking to see if it was at the top of a tree when it was traversing it, which caused unxpected application failures that I had to dig into manually to resolve.
+
+
+## Closing Thoughts
+
+Bearing all of that in mind:
+1. Vibe Coding is _absolutely fantastic_ for **experimentation and rapidly prototyping**.
+2. Hands-on "vibe coding" (AI-augmented development) is _indeed_ worth the hype, and **makes me 400% more productive (or more) _when I'm writing code_** (as opposed to doing design & architecture or research; although those become more efficient too).
+3. **Attempting to "Vibe Code" a project (in the truly hands-off sense) is unlikely to be successful if you are not technical** for any non-trivial project beyond a simple "notes" or "to-do" app
+4. I was able to successfully "Vibe Code" this project **because** I am technical and because I was able to correct claude when it got off the rails, and to identify root causes of things like performance issues that would've been otherwise very difficult to fix for non-technical individuals.
+5. Assuming that hands-off "vibe coding" a project is successful, **it will take you dramatically longer and will be dramatically worse than if you were technical**, or if you got someone technical to do it for you.
+6. **There is absolutely no way to avoid security issues in hands-off vibe-coded applications.**
+7. **Vibe coded apps should not be deployed to production ever**, absent the _absolutely strictest_ code review, performance analysis and security analysis
+8. **Dario Amodei and Sam Altman are lying to everybody.** AI is _not_ replacing 70% of software enginers any time soon. (When they say so, that is a sales pitch for their models more than a prediction of the future.) 
+    - Will it replace 70% of _react developers_ and other individuals whose skills lay solely with writing a single language or piece of the stack? Maybe. Not as soon as people think, but maybe. 
+    - But to me, this process really illustrated how crucial it is to be highly technical to get the most value out of AI, rather than how (as some people claim) you don't need to be technical or learn how to program at all.
+
+Overall this was a really good exercise and helped me to get a good feel for how good the best frontier models are _on their own_ right now (pretty good), vs. with an expert human steering, providing guidance, and providing high-quality context (insanely good). 

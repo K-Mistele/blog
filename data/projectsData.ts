@@ -7,6 +7,13 @@ interface Project {
 
 const projectsData: Project[] = [
 	{
+		title: "PostList: Port Monitor for MacOS",
+		description:
+			"A port monitor for MacOS that lives in your menu bar. View and track open ports and the processes using them. Great for tracking down those pesky Next.js dev servers.",
+		href: "https://github.com/K-Mistele/portlist",
+		imgSrc: "/static/images/port-monitor.png",
+	},
+	{
 		title: "One Dollar OAuth",
 		description:
 			"The simple, secure and cheap way to connect your SaaS app or agent to all the integrations you need! Just $1 per app per month; unlimited users!",
