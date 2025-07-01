@@ -7,6 +7,13 @@ interface Project {
 
 const projectsData: Project[] = [
 	{
+		title: "OpenSearch: TUI-Based Deep Research Agent",
+		description:
+			"A deep research agentic workflow built with Gemini 2.5 Pro and Flash, BoudaryML's BAML, Exa.ai's Search API and an Ink-based TUI.",
+		href: "https://github.com/K-Mistele/opensearch",
+		imgSrc: "/static/images/opensearch.png",
+	},
+	{
 		title: "PostList: Port Monitor for MacOS",
 		description:
 			"A port monitor for MacOS that lives in your menu bar. View and track open ports and the processes using them. Great for tracking down those pesky Next.js dev servers.",
