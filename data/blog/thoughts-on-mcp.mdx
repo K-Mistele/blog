@@ -1,0 +1,104 @@
+---
+title: "Why Everybody's Excited about MCP"
+summary: "Everything you need to know about MCP: what it is, how it works, and how you should be using it."
+date: 07/03/2025
+tags: ['AI', 'agents', 'MCP', 'auth']
+---
+
+## So what even _is_ MCP? 
+
+MCP, short for Model Context Protocol, is a protocol designed to enable developers and applications to provide context to agents & large language models (LLMs).
+The [MCP Specification](https://modelcontextprotocol.io) includes support for a number of different "context" primitives that can be provided to an agent, including prompts, tools, and resources,
+as well as a primitive called "sampling" that isn't used much.
+
+Read that, understand that, and then _forget_ that. 
+
+The primary use-case for MCP, and the only one that popular MCP clients like Cursor, Windsurf, and Claude code support, is tools. 
+
+# MCP is about tools
+
+The primary use-case for MCP right now is to plug tools (and therefore new capabilities) into your agents in a low-code, low-configuration way.
+
+Here's an example of my favorite **high-impact use-case** for software development: **Puppeteer's MCP server**. By adding a simple JSON configuration to Cursor:
+
+```json:.cursor/mcp.json
+{
+    "mcpServers": {
+        "puppeteer": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+        }
+    }
+}
+```
+
+my cursor agent can now drive puppeteer using 7 tools (including tools for navigation, interaction, screenshotting, and `eval()`-ing JavaScript code). 
+
+This unlocks an entirely new development workflow where I can have my agent write UI code, and then use puppeteer to interact with the UI directly. 
+My agent can **iterate on features faster**, design and implement UIs better**,
+(since the agent can see the actual UI that the code creates, not just the code), 
+**debug my app significantly faster**, and a lot more. 
+
+Notably, without MCP, _this would be far more difficult_. 
+The best alternative would be for me to write a bunch of bash or JavaScript or Python scripts to implement these capabilities,
+and then update the agent's prompt to inform it of these scripts and how to use them, and then hope for the best. 
+
+### Other examples
+Plugging Puppeteer into Cursor or Windsurf is just one example of a broad and diverse set of use-cases. Consider:
+
+* Plugging Claude Desktop or ChatGPT into your Google Docs so that they can create, read and save documents
+* Enabling agents to manage your Next.js deployments with the Vercel MCP server
+* Enabling background agents to send you slack messages when they need assistance with the Slack MCP Server
+* Enabling coding agents to update your GitHub/Linear/Jira issues & tickets as they make progress on issues and to make PRs when they're finished
+* Enabling voice agents to query your knowledge base without custom code
+
+In all these cases, MCP allows you to plug in arbitrary capabilities to LLMs without having to write custom code to handle the connections, requests, responses, and abstractions.
+
+MCP servers function like no-code pre-built integrations for your agent that give it tools or allow it to access third-party apps and software.
+
+# How should we understand MCP?
+Given this, how should we understand MCP?
+
+**MCP is a compatibility layer for extending agents & LLMs with arbitrary capabilities in a no-code manner**. You can think of it as a special type of API optimized for LLMs.
+
+
+## MCP vs. Traditional APIs
+Consider traditional APIs. They have:
+* a transport (HTTP)
+* an interface (JSON)
+* and a set of resources and capabilities that they expose through API routes
+* (usually) documentation for humans to read, e.g. a docs site or OpenAPI
+
+APIs then have to be implemented using a HTTP client in deterministic code, which has to be aware of the interface structure, the transport (your code has to set headers, query params, etc.), and all the other details except the actual implemnetation of the capabilities on the API's backend.
+
+MCP optimizes a lot of this for direct consumption by LLMs.
+Like a traditional API, MCP has:
+* a transport (which may be STDIO, server-sent events or SSE, a streamable HTTP transport, or WebSockets though it is unofficial)
+* an interface (JSON-RPC),
+* and a set of resources and capabilities that they expose.
+
+But while traditional APIs are designed to be consumed by software implemented by developers, MCP is intended to be consumed directly by LLMs & agents, so there are some significant differences.
+
+The agent isn't aware of the specifics of the transport (no headers or query parameters) — it just sends JSON and receives JSON. There are far fewer implementation details.
+
+The agent may not even be aware it's using MCP — the tools may be presented to it just like normal tools, with names, descriptions, and input schemas. In this regard, MCP can be thought of as a "self-documenting API". There are pre-determined methods to list tools, 
+which list the tool names, descriptions, and input schemas, and then an LLM generates a JSON call with the name and arguments according to the schema to use it. 
+
+### Authorization 
+MCP now handles authentication & authorization capabilities through [OAuth](https://www.digitalocean.com/community/tutorials/an-introduction-to-oauth-2), which allows 
+users to authorize them to access their applications and data with third-party providers that use OAuth like Google, HubSpot, Linear, etc.
+
+When a user initializes an MCP server for an agent, they may be prompted to authorize access to whatever capabilities and tools the server offers with OAuth, so that they can be exposed to the agent without any type of API key or token.
+In practice, this means that when you plug in an MCP server to your client, you will be prompted through a GUI to grant access to the server & agent. 
+
+Examples of where you might see this include in a Github or Google MCP server — servers where you are giving the LLM tools to manage remote resources in a third-party service. 
+
+This frees you from the complexity of managing API keys, environment variables, and all that.
+
+So to summarize, your new mental model for MCP should be that **MCP is a special type of plug-and-play API designed for LLMs & agents**.
+
+# Why are people excited about MCP?
+If you're like me, you've seen dozens of twitter and LinkedIn posts about how MCP is changing the world. 
+The truth is that there's a lot to be excited about, but the truth is a little more nuanced.
+
+
