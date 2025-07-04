@@ -56,35 +56,44 @@ In all these cases, MCP allows you to plug in arbitrary capabilities to LLMs wit
 
 MCP servers function like no-code pre-built integrations for your agent that give it tools or allow it to access third-party apps and software.
 
-# How should we understand MCP?
-Given this, how should we understand MCP?
+# How should you understand MCP?
+Given this, how should we understand MCP? Think about it this way:
 
 **MCP is a compatibility layer for extending agents & LLMs with arbitrary capabilities in a no-code manner**. You can think of it as a special type of API optimized for LLMs.
 
+Now, this isn't entirely accurate as it doesn't cover _everything_ that the MCP specification defines (including sampling), but this is a great mental model for the ways that MCP is actually, presently being used.
+
 
 ## MCP vs. Traditional APIs
-Consider traditional APIs. They have:
+Let's dig more into this model of MCP servers are LLM-optimized APIs. Consider traditional APIs. They have:
 * a transport (HTTP)
-* an interface (JSON)
-* and a set of resources and capabilities that they expose through API routes
+* an interface (usually JSON-based) that provides an abstract model for the underlying resources & capabilities
+* a set of resources and capabilities that are exposed through that interface
 * (usually) documentation for humans to read, e.g. a docs site or OpenAPI
 
 APIs then have to be implemented using a HTTP client in deterministic code, which has to be aware of the interface structure, the transport (your code has to set headers, query params, etc.), and all the other details except the actual implemnetation of the capabilities on the API's backend.
 
-MCP optimizes a lot of this for direct consumption by LLMs.
-Like a traditional API, MCP has:
+MCP optimizes a lot of this for direct consumption by LLMs. Like a traditional API, MCP has:
+
 * a transport (which may be STDIO, server-sent events or SSE, a streamable HTTP transport, or WebSockets though it is unofficial)
 * an interface (JSON-RPC),
 * and a set of resources and capabilities that they expose.
 
-But while traditional APIs are designed to be consumed by software implemented by developers, MCP is intended to be consumed directly by LLMs & agents, so there are some significant differences.
+But while traditional APIs are designed to be consumed by software implemented by developers, MCP is intended to be consumed directly by LLMs & agents, 
+so there are some significant differences.
 
-The agent isn't aware of the specifics of the transport (no headers or query parameters) — it just sends JSON and receives JSON. There are far fewer implementation details.
+The agent isn't aware of the specifics of the transport (no headers or query parameters), and it really isn't aware that the transport exists at all — 
+it just sends JSON and receives JSON. There are far fewer implementation details to worry about.
 
-The agent may not even be aware it's using MCP — the tools may be presented to it just like normal tools, with names, descriptions, and input schemas. In this regard, MCP can be thought of as a "self-documenting API". There are pre-determined methods to list tools, 
-which list the tool names, descriptions, and input schemas, and then an LLM generates a JSON call with the name and arguments according to the schema to use it. 
+The agent may not even be aware it's using MCP — the tools may be presented to it just like normal tools, with names, descriptions, and input schemas. 
+In this regard, MCP can be thought of as a "self-documenting API". There are pre-determined MCP "API" methods 
+which list information about the server's resources and about the server's tools (including the name, description, and JSON schema describing the input).
+The LLM or agent can use these methods on a connected MCP server to discover the tools and resources that are available to it, and can then intelligently decide
+when and how to access or invoke them. 
 
-### Authorization 
+## Note on Authorization 
+Traditional APIs can handle auth however they want - JWTs, HTTP basic auth, API keys, OAuth, or whatever else they want.
+
 MCP now handles authentication & authorization capabilities through [OAuth](https://www.digitalocean.com/community/tutorials/an-introduction-to-oauth-2), which allows 
 users to authorize them to access their applications and data with third-party providers that use OAuth like Google, HubSpot, Linear, etc.
 
@@ -98,7 +107,142 @@ This frees you from the complexity of managing API keys, environment variables, 
 So to summarize, your new mental model for MCP should be that **MCP is a special type of plug-and-play API designed for LLMs & agents**.
 
 # Why are people excited about MCP?
-If you're like me, you've seen dozens of twitter and LinkedIn posts about how MCP is changing the world. 
-The truth is that there's a lot to be excited about, but the truth is a little more nuanced.
+If you're like me, you've seen dozens of Twitter and LinkedIn posts about how MCP is changing the world.
 
+> Well, is it? 
 
+No. But it's still pretty great. It has a lot to offer:
+
+## MCP for ChatGPT / Claude Desktop users
+Non-technical users of ChatGPT, Claude Desktop and other MCP-compatible apps can use MCP to connect their LLM to their local filesystem, to Google Drive/Docs/Sheets/Slides, 
+Brave search, Obsidian, Notion, the command line, data science tools and Jupyter notebooks, even Google Ads, and more. 
+
+It enables them to connect their relatively limited LLM chat, which normally only has acess to web search and maybe code execution, to their favorite apps and tools, unlocking a whole new set of use-cases centered on productivity.
+
+## MCP for "Vibe Coders"
+MCP is even more popular with "Vibe Coders", who are typically non-technical or low-technical individuals using AI-powered code generation tools like Cursor, WindSurf, Bolt, v0, or Lovable to build apps. 
+
+MCP is popular with vibe coders becasueit enables them to upgrade their coding agent's capabilities to be more useful. For example, it could use the Vercel MCP server 
+to handle setting up their Next.js app for deployment on Vercel, and running deployments and checking logs. 
+
+They could use 
+
+## MCP for Engineers
+
+# Bonus: Cool MCP Servers you should try 
+As part of doing research for this post, I dug into what the most popular MCP servers are. I found that a lot of them are behind paywalls on Medium, or are
+spread out across various registries. In this section, I've put together a list of some of my favorites that are worth checking out. 
+
+## Context7 — Instant Context & Docs for your Stack
+Have you ever used Cursor's Documentation Indexing feature? Imagine having pre-index docs for all your favorite apps and services. 
+Instead of having to paste URLs, index docs and then `@mention` them in your agent chat, the Context7 MCP servers allows you to just 
+ask your agent a question, and tell it
+
+> use context7
+
+to answer and it will automatically locate and query the up-to-date docs for whatever you need.
+
+You can find the Context7 MCP server [here](https://github.com/upstash/context7), and you can install it like this:
+
+```json:.cursor/mcp.json
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp"
+    }
+  }
+}
+```
+
+## Google Ads - Analyze your Google Ads Data with AI 
+The [Google Ads MCP Server](https://github.com/cohnen/mcp-google-ads) is an _unofficial_ MCP server that wraps the google ads APIs and allows you to analyze your 
+google ads data through natural language. You can install it like this:
+
+```json:.cursor/mcp.json
+{
+  "mcpServers": {
+    "googleAdsServer": {
+      "command": "/FULL/PATH/TO/mcp-google-ads-main/.venv/bin/python",
+      "args": ["/FULL/PATH/TO/mcp-google-ads-main/google_ads_server.py"],
+      "env": {
+        "GOOGLE_ADS_AUTH_TYPE": "oauth",
+        "GOOGLE_ADS_CREDENTIALS_PATH": "/FULL/PATH/TO/mcp-google-ads-main/credentials.json",
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN_HERE",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "YOUR_MANAGER_ACCOUNT_ID_HERE"
+      }
+    }
+  }
+}
+```
+
+Note that this server requires some more technical information to successfully configure. 
+
+## Puppeteer: Let Your Agent Drive a Web Browser
+My personal favorite server allows my Cursor agent to drive [Puppeteer](https://pptr.dev/), a browser automation framework. 
+I love this server because it enables the agnet to navigate my apps as I'm building them, to interact with 
+them, and to take screenshots. 
+
+This rapidly speeds up the development cycle because the agent can see features and interfaces as it's building them, 
+and it can interact with them to test, validate and debug them.
+
+You can install the server [here](https://www.npmjs.com/package/@modelcontextprotocol/server-puppeteer)
+
+```json:.cursor/mcp.json 
+
+{
+    "mcpServers": {
+        "puppeteer": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+            "env": {
+                "PUPPETEER_LAUNCH_OPTIONS": "{ \"headless\": true}",
+                "ALLOW_DANGEROUS": "true"
+            }
+        }
+    }
+}
+```
+
+Note that if you want the agent to be able to drive _your_ browser with all of your cookies and sessions (which is useful for apps with auth), 
+you can set another environment variable with the path to your chrome data directory. This path is different depending on your OS, but for my Macbook it looks like this:
+
+```
+"CHROME_USER_DATA_DIR": "/Users/kyle/Library/Application Support/Google/Chrome/Default"
+```
+
+## Docker: Let Your Agent Manage Your Containers
+
+This server is really useful for docker- and Docker compose-based projects. Instead of making your agent write shell commands, 
+it gives your agent an easier way to manage docker and compose. I use this one a lot. You can install it [here](https://github.com/ckreiling/mcp-server-docker)
+like this:
+
+```json
+{
+    "mcpServers": {
+        "docker": {
+            "command": "uvx",
+            "args": [
+                "--from",
+                "git+https://github.com/ckreiling/mcp-server-docker",
+                "mcp-server-docker"
+            ]
+        },
+    }
+}
+```
+
+## Postgres: Enabling your Agent to Safely Query your Database 
+I work with postgres a lot whether through Supabase, Docker, AWS, or other servers. [This one](https://www.npmjs.com/package/@modelcontextprotocol/server-postgres) is really useful for me:
+
+```json:.cursor/mcp.json
+{
+    "mcpServers": {
+        "postgres": {
+            "command": "bunx",
+            "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres:YOUR_PASSWORD_HERE@pgvector:5432/postgres"]
+        }
+    }
+}
+```
+
+**Note that you need to make sure to not commit this to GitHub, unless you use another way of configuring your credentials!**
