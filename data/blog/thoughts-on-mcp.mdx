@@ -127,6 +127,11 @@ to handle setting up their Next.js app for deployment on Vercel, and running dep
 Similarly, they could use a Supabase MCP server to check on their Supabase project and query the database.
 
 ## MCP for Engineers
+MCP is popular with engineers because it allows them to level up their AI-powered coding tools like Cursor, Windsurf, Claude code, and even 
+custom agents or agentic workflows with new capabilities, with relatively little configuration.
+
+I already gave the example of Puppeteer, and there are several more below. For engineers, MCP is a way to make coding agents smarter, more efficient, 
+and more aware of important project context. 
 
 # Bonus: Cool MCP Servers you should try 
 As part of doing research for this post, I dug into what the most popular MCP servers are. I found that a lot of them are behind paywalls on Medium, or are
@@ -246,8 +251,6 @@ I work with postgres a lot whether through Supabase, Docker, AWS, or other serve
 
 **Note that you need to make sure to not commit this to GitHub, unless you use another way of configuring your credentials!**
 
-## Stripe: Connect your Agent to your Stripe Account 
-If you're building a SaaS app and are using Stripe for billing, [this](https://github.com/stripe/agent-toolkit/tree/main/modelcontextprotocol) is a great one to use:
 
 ```json:.cursor/mcp.json
 {
@@ -267,11 +270,6 @@ If you're building a SaaS app and are using Stripe for billing, [this](https://g
 
 Just like above, make sure to not commit this to Git!
 
-## Supabase — Connect your Agent to your Supabase Project
-Lots of developers love Supabase's open-source platform for everything from postgres hosting, to object storage, to pub-sub and even auth. 
-If you use Supabase for your projects, using [their MCP server](https://supabase.com/docs/guides/getting-started/mcp) is a no-brainer!
-
-This server enables you to query your database and project in natural language. Super useful!
 
 Here's how you can install it:
 
