@@ -1,8 +1,8 @@
 {
-  "ai": 5,
-  "agents": 4,
-  "mcp": 2,
-  "auth": 1,
+  "ai": 6,
+  "agents": 5,
+  "mcp": 3,
+  "auth": 2,
   "open-source": 3,
   "search": 1,
   "retrieval": 1,

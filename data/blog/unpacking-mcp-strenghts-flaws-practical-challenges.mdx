@@ -1,0 +1,74 @@
+---
+title: "MCP Deep Dive: What's Great, What's Broken, and What's Downright Dangerous"
+date: 07/07/2025
+summary: "I've spent months in the trenches building with MCP. This is my report from the front lines: a deep dive into MCP's powerful vision, frustrating reality, and critical security flaws."
+tags: ['AI', 'agents', 'MCP', 'auth']
+---
+
+## Introduction
+MCP's vision began with a great idea: a universal standard to connect AI models with arbitary tools and capabilities in a seamless, plug-and-play way.
+It's a fantastic vision, and as a result, a lot of people are [very excited about MCP](/blog/thoughts-about-mcp).
+The vision is evident in its specification, and the appeal of it is evident in the [truly enormous number of MCP servers](https://cursor.directory)
+that people built nearly overnight once MCP was released, and in the great deal of writing about it.
+
+However, once we move past that lofty vision, we descend into the (presently) broken reality, where poor design decisions and broken implementations abound,
+and where some serious security problems lay hidden.
+
+As someone who has spent recent months deep in the trenches building with MCP, I'm familiar with what's great about MCP, what's broken, and what's downright dangerous. 
+This is my report from the front lines.
+
+## The Good: A Visionary Specification with Untapped Potential
+
+On paper, [the MCP specification](https://modelcontextprotocol.io/) is impressive. 
+It provides a rich, universal framework for connecting AI models to tools, data, and services. 
+The most well-known primitive is tools, but the spec offers so much more:
+
+* **Resources**: For structured data access (e.g., connecting to a database).
+* **Prompts**: For providing specific context to a model.
+* **Roots**: For anchoring a model's operational context.
+* **Sampling**: An awesome primitive that could enable advanced use-cases like bidirectional communication between a model and a tool.
+* **Authorization**: Integrating an MCP server with an upstream OAuth authorization server allows a user to authorize an agent to take actions on his or her behalf with 3rd-party apps and services. 
+
+The spec also defines multiple different **transports** that provide optionality in how to use and deploy MCP.
+These primitives offer a powerful, holistic way to build sophisticated AI-powered applications. 
+
+And lots of great things have been built with MCP! I use Puppeteer's MCP server to enable faster testing and iteration 
+of UIs in my Cursor agent, and Supabase/Postgres MCP servers to give my agent database access, and a number of other things.
+
+So much cool stuff has been built! But unfortunately, so much of the specification's potential remains largely untapped.
+
+## The Broken: Where Implementations Fall Short, and the Spec Fails
+This is where the promise of MCP meets a harsh reality of incompleteness.
+Many parts of the MCP ecosystem are broken, either through incomplete implementation or because the specification itself is flawed.
+
+### Implementers only choose to support Tools
+Most MCP hosts like Cursor and Windsurf **only implement the _tools_ primitive of MCP**, and choose not to support resources, roots, prompts, and/or sampling.
+
+> Why?
+
+**Universality**. Tools are the most straightforward primitive.
+
+**Opinionation & Compatibility**: A primary critique of MCP which it released was that it seemed to be opinionated in favor of Anthropic's models.
+Apart from the Claude family of models, most models don't have a good way to model any of the MCP primitives apart from tools.
+So most MCP hosts apart from Anthropic-specific ones like Claude desktop stick to just tools because they are portable to non-Anthropic models in a comparatively easy manner. Other primitives would require special handling or additinoal abstractions and complexity.
+
+**Workarounds**: Resources can often be crudely implemented as tools, so implementers don't bother with a proper implementation.
+This is a broken practice. Many things currently modeled as tools, like database connectors, should really be resources. By ignoring the other primitives, the ecosystem is limiting MCP's power to its lowest common denominator.
+
+**Security and additional considerations**: Since **sampling** allows the MCP server to prompt the agent it's connected to, there are 
+security and trust considerations about if/how to allow this. Do you just let the LLM use the tools from the MCP server that's doing the sampling, 
+or all tools that are plugged into the agent? The latter would enable much more powerful functionality, but also introduces worse risks for a rogue MCP server. 
+(As I'll discuss later though, you should treat MCP servers like code — if you can't trust it 100%, you shouldn't run it).
+
+So ultimately the decision to primarily support the tools primitive is undestandable, while regrettable — it's the only one 
+that's truly portable and model-agnostic.
+
+
+## Other MCP R&D 
+Check out some of my other work on MCP with [Naptha AI](https://naptha.ai) here:
+- the first [non-platform-opinionated MCP server that implemented OAuth _and_ the Streamable HTTP Transport](https://github.com/NapthaAI/http-oauth-mcp-server) shortly after is was approved; which required rewriting parts of the TypeScript SDK to fix broken OAuth code
+- a fork of [Cloudflare's MCP-Remote](https://github.com/K-Mistele/mcp-remote) which supported bridging the Streamable HTTP Transport (not just SSE) to STDIO transports before Cloudflare's did
+- an early [platform for securely deploying SSE MCP servers](https://github.com/NapthaAI/mcpaas) on the public internet via session keys, before OAuth was added to the specification
+- a library [for wrapping popular agent frameworks with MCP tool bindings](https://github.com/napthaai/automcp) so that agents can call other agents as MCP servers, before Google released A2A
+
+You can find other posts tagged "MCP" [here](/tags/mcp) as well.
