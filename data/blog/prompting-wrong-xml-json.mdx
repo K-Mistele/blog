@@ -1,0 +1,187 @@
+---
+title: "You're Prompting Wrong: Drop JSON for XML"
+summary: "Exploring the syntactic and semantic differences between XML and JSON and why the former provides a more robust structure for complex LLM prompts"
+tags: ['llms', 'ai', 'prompting', 'agents', 'context-engineering', 'prompt-engineering']
+date: 07/10/2025
+---
+
+## Introduction
+
+I've been wrestling with an observation for a while now: when dealing with complex data structures, prompts formatted in XML seem to yield better, more reliable results from LLMs than equivalent prompts formed with JSON. It felt counter-intuitive at first, since JSON is much more commonly-used than XML and is the default data interchange format for most modern apps. 
+
+But I think I've finally landed on a solid explanation. It comes down to the difference between syntax and semantics, and how an LLM "sees" the data you give it. I posted [a quick thought on this](https://x.com/0xblacklight/status/1942787852481225039) recently, and it seemed to resonate with a lot of people so I wanted to expand on it.
+
+Here's what I initially wrote: 
+> I have been trying to reason about why XML seems to be better for prompting than JSON and I think I finally have a decent explanation
+> 
+> LLMS operate over both syntax and semantics, but excel at semantics. 
+> 
+> JSON represents a key/value data structure where your key is semantic, but both the key and value are delimited by syntax NOT semantics. 
+> 
+> XML is slightly different because the delimiters are both syntactic and semantic. 
+> 
+> unlike open and close quotes in JSON which then have to be correlated to the matching key, (which can be hard for complex objects or large lists), 
+> 
+> XML tags are both semantic and syntactic. They delimit fields AND reflect the semantic structure of the information.
+> 
+> so XML tags provide syntactic field delimitation but also provide semantic information at the beginning and end of each field; JSON does not. 
+> 
+> How this functions differently is particularly observable in practice, and easier to reason about, when you are dealing with large-sized lists of reasonably complicated objects (more than a couple fields)
+
+
+Let's unpack that. 
+
+(_Note: a lot of the claims I make here are not substantiated by any data that I have collected, except that "XML works better than JSON for complex data". I'm mostly relying on my understanding of LLMs' internals and how mechanisms like self-attention work to try and reason through and _intuit_ (vibe?) why this performance difference is observable._)
+
+## The Core Idea: Syntax vs. Semantics
+
+First, some quick definitions:
+* **Syntax**: The rules and structure governing how tokens can be combined into valid expressions in a language
+* **Semantics**: The meaning and interpretation of expressions in a language - what the syntax actually represents
+
+LLMs are fundamentally sequence processors. Autoregressive self-attending sequence processors. They are sophisticated, but they are still fundamentally reading a linear (sequential) sequence of tokens. What are the implications of this?
+
+Their ability to understand "meaning" (semantics) emerges from this process, but that ability can be strengthened or weakened by the structure of the input. That is, the same information presented differently may be more- or less-well understood by the LLM depending on the syntactic structure of the information.
+
+**A corollary to this is the LLMs process both syntax _and_ semantics, but they are better at processing semantics.** LLMs operate over natural language, not abstract syntax trees or formal logic or other types of formal specifications. While they are still entirely capable of processing syntactic information, they are still processing it in a semi-semantic way since they are not naturally capable of correctly mechanisticallyevaluating arbitrary symbolic systems or syntax specifications.
+
+This can be trivially demonstrated by asking an LLM what normal human-written code does, vs. by giving it a minified and symbol-name-stripped bundle of that same code, like one might use to ship a large script to the browser. Or, by asking the LLM to write code without using semantic symbol names.
+
+**It is obviously the case that the LLM will perform better on the version of each task where semantic and syntactic information are co-located, rather than on the version of the task where most of the semantic information is absent**.
+
+### JSON Separates Syntax from Semantics 
+In JSON, the semantic information about what an arbitrary field represents (i.e., the **key**) is distinct from the syntactic delimiters (`{`, `}`, `[`, `]`, `,`, `"`) that define 
+the field. To understand a JSON field's meaning and purpose, the LLM must (a) identify & process the field based on its delimiters and (b) locate the key defining what the field means.
+
+In large data structures (e.g. large arrays of objects), that semantic information may be _far away_ from the end of a given field. 
+So to understand such a value, the model must look backwards (sometimes quite far backwards), past a potentially large number of purely syntactic delimiters `"` and `:` to find 
+the corresponding key, and to hold that relationship in its' attention mechanism. 
+
+Especially for complex data structures or fields with nested ojects or arrays that imply lots of nested keys and values, there will be a _large number_ of those delimiters, making it more challenging for the LLM to locate the right ones to find the **correct** key matching the given field, since there are a number of fields and sub-fields that are semantically different but which use the same delimiters as the field that the model is actually looking for.
+
+You can think of this as creating some type of **cognitive load** for the LLM. Now this may seem un-intuitive, since it often feels easy to locate the right key for a value in a JSON object. 
+And many times it is! But consider that your IDE is doing a     lot of work for you to enable better understanding by formatting the JSON for you with indents and newlines which provide additional visual spatial context 
+that allow you to find it easier. 
+
+Consider the following example. In which example is it easier to locate the correct key for a given field?
+
+In this example, which is the way _you_ process the JSON object through your IDE, with visual and spatial information?
+
+```json:example.json
+{
+  "media_collection": {
+    "fiction": {
+      "books": [
+        { "title": "Dune", "author": { "lastName": "Herbert" } }
+      ],
+      "movies": [
+        {
+          "title": "Inception",
+          "director": "Christopher Nolan",
+          "cast": [
+            { "actor": "Leonardo DiCaprio", "role": "Cobb" },
+            { "actor": "Joseph Gordon-Levitt", "role": "Arthur" } 
+          ]
+        }
+      ]
+    },
+    "non-fiction": {
+      "books": [
+        { "title": "Sapiens: A Brief History of Humankind", "author": { "lastName": "Harari" } }
+      ],
+      "movies": [
+        {
+          "title": "My Octopus Teacher",
+          "cast": [ { "actor": "Craig Foster", "role": "Himself" } ]
+        }
+      ]
+    }
+  }
+}
+```
+
+Or in _this_ example, where you only have a sequence of tokens absent syntax highlighting and visual and spatial cues? 
+
+```txt:example2.json
+{"media_collection":{"fiction":{"books":[{"title":"Dune","author":{"lastName":"Herbert"}}],"movies":[{"title":"Inception","director":"Christopher Nolan","cast":[{"actor":"Leonardo DiCaprio","role":"Cobb"},{"actor":"Joseph Gordon-Levitt","role":"Arthur"}]}]},"non-fiction":{"books":[{"title":"Sapiens: A Brief History of Humankind","author":{"lastName":"Harari"}}],"movies":[{"title":"My Octopus Teacher","cast":[{"actor":"Craig Foster","role":"Himself"}]}]}}}
+```
+
+When the LLM is processing `"actor": "Craig Foster", "role": "Himself"`, its context is defined by a fragil chain of preceeding syntax. The closure of this context is a series of `"`, `}`, `]`.
+These identical tokens represent vastly different levels of data hierarchy, a cast member, a cast list, a movie, a movie list, and a category. 
+This ambiguity creates a high risk of the model losing its place or "bleeding" context between unrelated questions, especially when it needs to operate at multiple of levels of the information hierarchy, e.g. "in what movie did Craig foster play himself?".
+
+### XML Co-Locates Syntax and Semantics
+Now, let's look at the same data in XML. Every elemet is explicitly scoped by opening and closing tags which both delimit the field, defining the informtion architecture, and which provide semantic information about that field.
+
+```xml:example3.xml
+
+<media_collection>
+  <fiction>
+    <books>
+      <book>
+        <title>Dune</title>
+        <author><lastName>Herbert</lastName></author>
+      </book>
+    </books>
+    <movies>
+      <movie>
+        <title>Inception</title>
+        <director>Christopher Nolan</director>
+        <cast>
+          <member>
+            <actor>Leonardo DiCaprio</actor>
+            <role>Cobb</role>
+          </member>
+          <member>
+            <actor>Joseph Gordon-Levitt</actor>
+            <role>Arthur</role>
+          </member>
+        </cast>
+      </movie>
+    </movies>
+  </fiction>
+  <non-fiction>
+    <books>
+      <book>
+        <title>Sapiens: A Brief History of Humankind</title>
+        <author><lastName>Harari</lastName></author>
+      </book>
+    </books>
+    <movies>
+      <movie>
+        <title>My Octopus Teacher</title>
+        <cast>
+          <member>
+            <actor>Craig Foster</actor>
+            <role>Himself</role>
+          </member>
+        </cast>
+      </movie>
+    </movies>
+  </non-fiction>
+</media_collection>
+```
+
+This might actually be a little harder for humans to read since it's denser, but linearized it looks like this:
+
+```txt:example4.xml
+<media_collection>  <fiction>    <books>      <book>        <title>Dune</title>        <author><lastName>Herbert</lastName></author>      </book>    </books>    <movies>      <movie>        <title>Inception</title>        <director>Christopher Nolan</director>        <cast>          <member>            <actor>Leonardo DiCaprio</actor>            <role>Cobb</role>          </member>          <member>            <actor>Joseph Gordon-Levitt</actor>            <role>Arthur</role>          </member>        </cast>      </movie>    </movies>  </fiction>  <non-fiction>    <books>      <book>        <title>Sapiens: A Brief History of Humankind</title>        <author><lastName>Harari</lastName></author>      </book>    </books>    <movies>      <movie>        <title>My Octopus Teacher</title>        <cast>          <member>            <actor>Craig Foster</actor>            <role>Himself</role>          </member>        </cast>      </movie>    </movies>  </non-fiction></media_collection>
+```
+
+The difference between this and JSON is night-and-day from the model's perspective:
+* **Unambiguous semantic delimitation**: Each `<member></member>` is a discrete, self-contained unit. There's no question about if a `</member>` close-tag indicates the end of a member field, or of the cast array, or of the movies or non-fiction section alltogether. Similarly, there's no question about what the semantics are of what's between two `<member></member>` tags.
+    *  Contrast with JSON, where a single `}` or `]` `"` could indicate the beginning or end of a cast member's name, or the member object, or the array of cast members, or the movie object, or of the array of movies, or of the non-function scope. 
+    * **In XML the delimiters provide semantic information about what the field MEANS at both the beginning and end of the field**, contrasted with JSON where field's semantic information is only _before_ the field, and which uses the same delimmiters for all fields including nested fields.
+    * An arbitrary XML delimiter provides useful information about what comes either immediately after or before it: e.g. `<member>` tells you you're about to see a member, or `</member>` tells you that you just saw one. Seeing an individual JSON delimiter (`"`, `[`, `{`) tells you **nothing** about what field you just saw.
+* **Explicit scoping**: The `<fiction></fiction>` scoping is an unmissable semantic container. There's no ambiguity about which category any items between these tags belong to. [Cyrus](https://x.com/cyrusnewday) described it in a way that I like: "Attentional bounding boxes for your context"
+* **Self-Contained Items**: Each `<member>...</member>` is a discrete, self-contained unit. The closing `</movie>` tag collapses a huge chunk of context with a single, meaningful token, telling the model, "The entire 'movie' concept is complete. You can reset."
+* **Context Navigation**: The nested tags create a clear breadcrumb trail, making it far easier for the model's attention mechanism to navigate the structure with less ambiguity about what a delimiter means or where its field starts/ends, and therefore with less error.
+
+## The Takeaway 
+When you're prompting an LLM, you are the architect of its world. Your goal should be to make that world as clear, unambiguous, and easy-to-nativate as possible.
+
+While JSON is excelled for machine-to-machine communication in systems that are purely syntactic (i.e traditional software), XML's structure is better suited to the semantic attention-based way that LLMs process information. 
+By fusing semantic labels with syntactic delimitation, XML provides a more robust and redundant structure that helps the model stay on track. 
+
+So next time you're building a complex prompt with lots of data, rules, or information to present? Try giving XML a shot. 
+Its verbosity is not a weakness, it's a feature.
