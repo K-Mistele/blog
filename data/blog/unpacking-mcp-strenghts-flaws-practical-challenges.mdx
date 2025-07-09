@@ -41,7 +41,7 @@ So much cool stuff has been built! But unfortunately, so much of the specificati
 This is where the promise of MCP meets a harsh reality of incompleteness.
 Many parts of the MCP ecosystem are broken, either through incomplete implementation or because the specification itself is flawed.
 
-### Implementers only choose to support Tools
+### 1. MCP Implementers Only Support Tools
 Most MCP hosts like Cursor and Windsurf **only implement the _tools_ primitive of MCP**, and choose not to support resources, roots, prompts, and/or sampling.
 
 > Why?
@@ -63,8 +63,142 @@ or all tools that are plugged into the agent? The latter would enable much more 
 So ultimately the decision to primarily support the tools primitive is undestandable, while regrettable — it's the only one 
 that's truly portable and model-agnostic.
 
+### 2. The Transport Layer Mess 
+MCP's transport options are a mixed bad. Between inconsistent feature support, blurred lines, and unsuitability for production use-cases,
+it can be hard for implementers to choose the right transport 
+The newer Streamable HTTP transport, which is optionally stateless, is really great! 
 
-## Other MCP R&D 
+**STDIO works well for local apps like Cursor & Windsurf, but is not well-suited for production**. 
+
+To use an MCP server that uses the STDIO transport, you launch another process with `npx`, `bunx`, `uv`/`uvx` or something simliar, and then 
+MCP JSON-RPC messages are sent into the process via STDIN, and received via STDOUT. 
+This works well for applications running locally on your host, but there are a number of problems for deploying this as an application:
+1. **Hidden Dependencies**: MCP servers often rely on tools & toolchains like `npx`, `uv`, `docker`, etc. to install and run the MCP server's source code and dependencies.
+These dependencies are not tracked in your project's version control, and may not be installed in your deployment environment (if they're installable at all, e.g. with Vercel's platform)
+2. **Long-Lived Stateful Connections**: STDIO servers require a long-lived stateful connection between the MCP client and the server. This doesn't work for serverless deployment platforms that use 
+short-lived functions like AWS Lambda, Vercel, and certain cloudflare products. 
+3. **Poor Scaling Properties**: For each agent loop/thread/instance that you have that needs to use the MCP server, you need _an entirely separate instance of the MCP server_ in a new process. This means that the number 
+of processes you have to run scales linearly with the number of agents that you have. These processes can use up system resources, especially memory. In an idea world, you'd want one server instance to be able to serve
+multiple different agent instances.
+4. **Feature incomplete-ness**: STDIO MCP servers are not compatible with the [OAuth portion of the MCP Specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization); to do so you must use an MCP bridge/proxy like [`mcp-remote`](https://www.npmjs.com/package/mcp-remote). 
+This may not seem like a big problem right now, but lack of feature parity between transports makes transports less transparent to applications and makes the protocol more difficult to maintain.
+
+**Similar problems obtain with SSE.**
+1. **Hidden Dependencies**: Similar to STDIO, this is a problem with SSE too. Especially for remote SSE servers. 
+1. **Long-lived stateful connections**: Similar to STDIO, SSE requires long-lived stateful connections that are unsuitable for serverless environments. 
+3. **Poor Scaling Properties**: SSE does not multiplex multiple clients to a single server, so you must have a unique SSE instance for each agent instance. 
+This is additionally a problem because SSE binds to a port, so you must either use different ports and implement a discovery mechanism, or implement a proxy that handles session tracking and routing. 
+4. **Unclear best practices**: Unlike STDIO, SSE can be used for both local and remote MCP servers. It supports OAuth, but is more commonly used with API keys, session tokens, or bearer tokens. 
+How to handle initiating multiple SSE servers and port binding with proxies, and authorization and routing are all open questions; deploying SSE to production for both production and local use-cases requires 
+implementing solutions to this that are not part of the specification and for which best practices do not exist. 
+
+**Streamable HTTP is the right way forward, but still has problems.**
+The streamable HTTP transport fixes a lot of the problems with STDIO and SSE. It's optionally stateless by specification, which means that 
+individual MCP servers can elect to implement streaming, or just a shorter-lived request/response pattern. It's up to clients to roll with whatever
+the server chooses, though — there's no negotiation (which is fine imho, just worth nothing).
+
+The streamable HTTP transport _also_ supports OAuth, which is a big win. But there are still a few major drawbacks:
+1. Despite being adopted _months ago_, most popular MCP hosts still don't support this transport. As a result, most servers don't support it. 
+2. **Unlike the STDIO and SSE transports**, streamable HTTP servers do _not_ separate the transport from the server in the same way. 
+The user must write a web app which properly consumes/implements the transport, and which calls the MCP server when appropriate. 
+Reference implementations exist in the documentation, but this is a pain for people who want to write a server once and then deploy it with arbitrary transports. 
+
+### 3. The OAuth Debacle
+MCP supports OAuth, yay! _Unfortunately_, this is a place where **both the specification and the implementation of the specification are bad**.
+Adding OAuth to MCP was _100%_ the right idea, but the execution was frankly poor. Why? 
+
+The specification incorrectly mandates than an MCP server should behave **both** as an OAuth [authorization server](https://datatracker.ietf.org/doc/html/rfc6749#section-1.1), **and** as an OAuth [resource server](https://datatracker.ietf.org/doc/html/rfc6749#section-1.1).
+
+As [Jared Hanson](https://x.com/jaredhanson), the creator of Passport JS, founder of [Keycard Labs](https://keycard.ai), and author of most OAuth-Related JavaScript code on the internet [observed in the MCP OAuth RFC](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/133#pullrequestreview-2541159319), 
+**the proposed (and later accepted) RFC has an incorrect model and implementation of the protocol**.
+
+This is poor from a protocol design standpoint, this is poor from a security standpoint, this is bad from a compatibility standpoint, and this is bad from a **server builder's standpoint**.
+The decision to model MCP this way seems to have been made out of convenience and ease-of-implementation concerns rather than longer-term concerns. 
+
+For what it's worth, the MCP specification [relies on several OAuth extensions](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#standards-compliance)
+including the rarely-used [RFC7591 Dynamic Client Registration Protocol](https://datatracker.ietf.org/doc/html/rfc7591) to facilitate on-the-fly client registration with the MCP server since it behaves as an authorization server, 
+as well as the (relatively) new [RFC9728 Protected Resource Metadata](https://datatracker.ietf.org/doc/html/rfc9728) standard.
+
+> Okay, but why is this a problem?
+
+I'm so glad you asked. 
+
+**First**, OAuth-enabled MCP server implementers now have to either (a) implement all of these OAuth capabilities _into their MCP servers_, or 
+(b) have to _proxy all OAuth-related requests to an upstream OAuth authorization server. **Both of these are exceptionally bad options.**
+
+1. MCP server developers should not have to implement OAuth and multiple rarely-used OAuth extensions to ship a streamable HTTP server that supports OAuth. **To suggest otherwise is frankly ridiculous**
+2. The [reference code](https://github.com/modelcontextprotocol/typescript-sdk/tree/main?tab=readme-ov-file#proxy-authorization-requests-upstream) is **incomplete and broken**.
+When I implemented the [second Streamable HTTP- and OAuth-compatible MCP server to exist](https://github.com/napthaai/http-oauth-mcp-server), 
+I had to [subclass and re-implement multiple parts of OAuth-related functionality](https://github.com/NapthaAI/http-oauth-mcp-server/blob/main/src/lib/extended-oauth-proxy-provider.ts) due to broken dynamic client registration, hard-coded URLs, 
+and proxy logic that **will not work for 99% of OAuth authorization server providers** due to lack of support for the [Dynamic Client registration](https://datatracker.ietf.org/doc/html/rfc7591) OAuth extension which [MCP relies on](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization).
+3. The approach recommended by the docs and reference code, of proxying to an upstream OAuth provider, has several security concerns that are not described in the docs, and which implementers would not know to provide for. I will write more on this below.
+
+**Second**, A core principle of OAuth is the separation of concerns. This design is not just wrong; it's a known security anti-pattern. 
+
+Furthermore, the specification's reliance on [Dynamic Client Registration](https://datatracker.ietf.org/doc/html/rfc7591) was a terrible decision. 
+Almost no major OAuth providers (Google, GitHub, etc.) support it out of the box. Auth0 supports it, but requires you enable it since it's not enabled by default. 
+The ability to do this is buried deep in settings menus, and your dashboard and tenant get incredibly messy (and messed-up) if you enable it since Auth0 does not intend for this use-case. 
+
+This means that to build a compliant MCP server, **even if you implement a proxy to an upstream OAuth provider**, in most cases you will _still_ have to 
+implement some type of wrapper to support Dynamic Client Registration and other parts of OAuth yourself just to proxy to an upstream provider. 
+
+As I mentioned above, this isn't theoretical — I had to rewrite broken OAuth code in the official TypeScript MCP SDK to get my server working correctly.
+
+## The Dangerous: A Pragmatic Guide to MCP Security
+
+
+### Remote Code Exection on your Host
+
+With all the talk about MCP security (some of which is motivated by opportunistic security vendors), you might think that MCP requires a complex 
+new threat or risk model. It doesn't. **The trust model is simple and should be treated exactly like any other third party dependency**.
+
+Here's how you should think about it:
+1. **Local MCP Servers (STDIO & SSE)**: Treat any MCP server you install and run locally the same way that you would an `npm` or PyPi package. 
+They are _arbitrary code_. If you don't trust the author and the distribution source, _don't download and run it_. It's that simple. 
+A malicious local MCP server could execute arbitrary code, or prompt-inject your LLM.
+2. **Remote MCP Servers (SSE, Streamable HTTP)**: Treat any remote MCP server just like any untrusted software. If you don't trust the author and/or domain, 
+_do not connect to the server or send it credentials_. In a sense, you should actually also treat it as local MCP server in that you should treat it 
+as untrusted code - since in addition to stealing credentials, a rogue remote MCP server could easily trick your coding agent into writing and executing malicious code. 
+
+While the specific implementations of the attack (arbitary code execution by malicious software) differ slightly for remote MCP servers in that they 
+are remote apps that can cause code execution on your local device, the model you should have for both is simple. **Do not blindly trust code that you didn't write**.
+
+### OAuth-related security flaws 
+Having said that, there are other issues that can (and commonly do) arise in MCP servers' implementation of the OAuth part of the MCP specification for remote MCP servers that you need to 
+be aware of:
+
+**Access token issuance when using MCPs as proxies for upstream OAuth Authorization servers**. 
+
+As noted, if you are proxying an MCP server's authorization logic to an upstream Authorization server, you may be tempted to return the access token from 
+the upstream authorization server to the downstream client. **You should not do this**; rather you should verify the access token from the server, and then issue a sort of "proxy token" 
+to the client, which the client can then to use with your MCP server, and upon verification when necessary, your MCP server can make authorized requests to resource servers with the actual access
+token from the authorization server. 
+
+Exposing the access token from the upstream authorization server to the downstream client can allow a compromised or malicious client 
+to access resources with upstream resource servers in undesired ways, especially if the issued access token has over-permissive scopes. Issuing a sort of "proxy access token" to the client, and ensuring that the only time 
+that the real access token is used is in requests from your MCP server to the correct resource servers, prevents this attack.
+
+**Phishing attacks by malicious MCP servers**
+
+Regrettably, I can't share a lot about this attack right now since it's a severe issue in the current protocol revision (`2025-06-18`) that is (a) unpatched,
+and (b) trivially exploitable. You should think of this is a High- or Critical-severity CVE issue involving credential theft.
+
+I was initially going to write about this in more detail, but all information about it has been stripped from the public GitHub threads & discussions, and numerous 
+tweets about it have been deleted. I didn't get the memo directly, but this indicates that the protocol maintainers are not ready for the specifics of this issue to 
+be made public until it can be remediated, so I have elected to not share specifics at this time. 
+
+## Conclusion: A Plea for Refinement
+My journey with MCP reveals a protocol that has a great vision, but a flawed execution. To move forward, the community needs to:
+1. **Clean up the transport mess**: Deprecate the SSE transport in favor of streamable HTTP transport; support OAuth in the STDIO transport, and provide 
+clear recommendations about when it is (and is not) appropriate to use each transport. Also, better-separate concerns in the streamable HTTP transport's implementation.
+2. **Fix the OAuth extension to the spec**: The OAuth implementation must be revised. MCP servers should be modeled as resource servers _only_, dropping dynamic client registration.
+3. **Improve the ecosystem**: Broad client support for the streamable HTTP transport and for the OAuth extension are both needed.
+4. **Embrace the full spec**: We need to move beyond a "tools only" world and enourage the use of all the powerful primitives that MCP has to offer.
+
+MCP has the potential to be a foundational layer for the next generation of AI applications. but to get there, we need to close the gap between its ambitious promise and 
+its currently broken reality.
+
+### Appendix: Other MCP R&D 
 Check out some of my other work on MCP with [Naptha AI](https://naptha.ai) here:
 - the first [non-platform-opinionated MCP server that implemented OAuth _and_ the Streamable HTTP Transport](https://github.com/NapthaAI/http-oauth-mcp-server) shortly after is was approved; which required rewriting parts of the TypeScript SDK to fix broken OAuth code
 - a fork of [Cloudflare's MCP-Remote](https://github.com/K-Mistele/mcp-remote) which supported bridging the Streamable HTTP Transport (not just SSE) to STDIO transports before Cloudflare's did
