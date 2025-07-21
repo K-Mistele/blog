@@ -1,0 +1,320 @@
+---
+title: "Building Kydenticon: A TypeScript Library for GitHub-Style Identicons"
+date: 07/20/2025
+tags: ["typescript", "open-source", "identicons", "npm", "bun", "next.js"]
+draft: false
+summary: "Deep dive into creating a zero-dependency TypeScript library for generating beautiful, deterministic identicons with PNG and SVG support, built with modern tooling."
+---
+
+## Introduction
+
+User avatars are everywhere in modern web applications, but what happens when users don't upload profile pictures? Many platforms solve this with **identicons** - those distinctive geometric patterns that GitHub popularized for user profiles. They're deterministic (same input = same pattern), visually appealing, and instantly recognizable.
+
+I recently built [**kydenticon**](https://github.com/k-mistele/kydenticon), a TypeScript library that generates GitHub-style identicons with zero dependencies. Here's the story of building it and the technical decisions that went into creating a modern, developer-friendly identicon library.
+
+## The Problem with Existing Solutions
+
+Most existing identicon libraries have one or more issues:
+
+- **Heavy dependencies** that bloat your bundle
+- **Limited output formats** (usually just canvas-based)
+- **Poor TypeScript support** or no types at all
+- **Complex APIs** that require deep configuration knowledge
+- **No modern framework integration** (especially Next.js App Router)
+
+I wanted something that was:
+
+- Zero dependencies with built-in PNG encoding
+- TypeScript-first with excellent DX
+- Multiple output formats (PNG buffers and SVG strings)
+- Simple API with sensible defaults
+- Ready-to-use Next.js and Express.js integration
+
+I also felt very strongly about using identicons that match GitHub-Style identicons! They look very clean and are universally recognizable. 
+They are very unique and easy to track mentally, and I'm a big fan.
+
+It turns out that the algorithm GitHub uses isn't open-source, but there is a [Rust implementation](https://github.com/dgraham/identicon) by a [former GitHub engineer](https://github.com/dgraham) that claims to match / be similar to GitHub's.
+
+I used this as the foundation of my design.
+
+## Core Algorithm Design
+
+The heart of any identicon library is the algorithm that converts a string input into a visual pattern. Here's how kydenticon works:
+
+### 1. Deterministic Hashing
+
+```typescript:hash.ts
+import { createHash } from "crypto";
+
+function generateHash(input: string): string {
+  return createHash("sha512").update(input).digest("hex");
+}
+```
+
+Using SHA-512 ensures we get consistent, well-distributed hash values that won't collide for different inputs.
+
+### 2. Pattern Generation
+
+The key insight is that identicons need to be **symmetric** to look good. Instead of generating a full 5×5 grid, we only generate the left half and mirror it:
+
+```typescript:generate-pattern.ts
+function generatePattern(hash: string, size: number): number[][] {
+  const pattern: number[][] = Array(size)
+    .fill(null)
+    .map(() => Array(size).fill(0));
+  const hashBytes = Buffer.from(hash, "hex");
+
+  let byteIndex = 0;
+  const halfWidth = Math.ceil(size / 2);
+
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < halfWidth; col++) {
+      const bit = (hashBytes[byteIndex % hashBytes.length] >> col % 8) & 1;
+      pattern[row][col] = bit;
+
+      // Mirror to create symmetry
+      if (col < Math.floor(size / 2)) {
+        pattern[row][size - 1 - col] = bit;
+      }
+
+      if (col % 8 === 7) byteIndex++;
+    }
+  }
+
+  return pattern;
+}
+```
+
+This creates the distinctive symmetric patterns that make identicons visually appealing and recognizable.
+
+### 3. Color Generation
+
+Colors are derived from the hash to ensure consistency:
+
+```typescript:color.ts
+function generateColor(hash: string): [number, number, number] {
+  const r = parseInt(hash.slice(0, 2), 16) / 255;
+  const g = parseInt(hash.slice(2, 4), 16) / 255;
+  const b = parseInt(hash.slice(4, 6), 16) / 255;
+
+  // Adjust for better visual appeal
+  return [
+    Math.max(0.3, r), // Ensure minimum brightness
+    Math.max(0.3, g),
+    Math.max(0.3, b),
+  ];
+}
+```
+
+## Zero-Dependency PNG Encoding
+
+One of the biggest challenges was implementing PNG encoding without external dependencies. Most libraries rely on `canvas` or `sharp`, but I wanted something that worked everywhere Node.js runs.
+
+The solution was implementing a minimal PNG encoder from scratch:
+
+```typescript:png-encoder.ts
+function encodePNG(width: number, height: number, pixels: Uint8Array): Buffer {
+  const png = new PNGEncoder(width, height);
+
+  // PNG signature
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+  // IHDR chunk
+  const ihdr = png.createIHDRChunk();
+
+  // IDAT chunk (compressed pixel data)
+  const idat = png.createIDATChunk(pixels);
+
+  // IEND chunk
+  const iend = png.createIENDChunk();
+
+  return Buffer.concat([signature, ihdr, idat, iend]);
+}
+```
+
+This approach keeps the library lightweight while providing native PNG output that works in any Node.js environment.
+
+## API Design Philosophy
+
+I focused on making the API as simple as possible for common use cases while still being flexible:
+
+```typescript:usage.ts
+// Simple case - just works
+const png = generateIdenticonPng("user@example.com");
+
+// Advanced case - full control
+const customPng = generateIdenticonPng(
+  "user@example.com",
+  7, // 7×7 grid
+  25, // 25px per pixel
+  0.1, // 10% padding
+  ["#FF6B6B", "#4ECDC4", "#45B7D1"], // Custom colors
+);
+```
+
+The library provides three main functions:
+
+- `generateIdenticonPng()` - Returns a Buffer for server-side use
+- `generateIdenticonSvg()` - Returns SVG string for web use
+- `generateRawIdenticonTable()` - Returns raw pattern data for custom rendering
+
+## Next.js Integration
+
+Modern web development often involves Next.js, so I built first-class support for the App Router:
+
+```typescript:app/api/identicon/[identifier]/route.ts
+import { createIdenticonRouteHandler } from "kydenticon";
+
+export const GET = createIdenticonRouteHandler(
+  5, // 5×5 grid
+  20, // 20px per pixel
+  // Custom color palette - one of these will be deterministically picked from the hash
+  ["#FF6B6B", "#4ECDC4", "#45B7D1"], 
+  0.1, // 10% padding
+  "png", // PNG format
+);
+```
+
+This creates a route handler that automatically:
+
+- Extracts the identifier from the URL
+- Generates the appropriate identicon
+- Sets correct headers (`Content-Type`, `Cache-Control` -  can be set to a year since identicons are static)
+- Returns the binary data
+
+The app can then use `/api/identicon/<identifier>` as the source URL for an `<img>` or `<Image>` from `next/image` directly.
+
+## Modern Tooling with Bun
+
+I built kydenticon using [Bun](https://bun.sh) instead of traditional Node.js tooling. Bun provides:
+
+- **Fast package management** - `bun install` is significantly faster than npm
+- **Built-in TypeScript support** - No need for separate compilation steps
+- **Integrated testing** - `bun test` runs tests without additional setup
+- **Bundle building** - `bun build` creates optimized distributions
+
+The development experience is noticeably smoother, especially for the rapid iteration needed when fine-tuning visual algorithms.
+
+## Performance Considerations
+
+Identicon generation needs to be fast since it often happens in request handlers. Key optimizations include:
+
+1. **Efficient bit manipulation** for pattern generation
+2. **Minimal memory allocation** during PNG encoding
+3. **Cached color calculations** to avoid repeated work
+4. **Optimized SVG generation** with minimal string concatenation
+
+## Note on dependencies
+This repository has zero non-node dependencies. It does use `node:crypto` and `node:zlib`. `node:zlib` could be easily be replaced
+with `pako`, a [pure JavaScript implementation of `node:zlib`](https://npmjs.com/package.pao) for browser and edge environments. 
+
+Similarly, `node:crypto` could be replaced with web crypto (`globalThis.crypto` or `require('node:crypto').webcrypto`). 
+
+Replacing both of these would allow for deployment to environments like the Browser or Cloudflare Workers. 
+
+## Real-World Usage Examples
+
+Here are a few real-world / practical examples: 
+
+### User Profile Fallbacks
+
+```typescript:user-avatar.ts
+function getUserAvatar(user: User): string {
+  if (user.profilePicture) {
+    return user.profilePicture;
+  }
+
+  // Generate deterministic fallback
+  const png = generateIdenticonPng(user.email, 5, 32, 0.1);
+  return `data:image/png;base64,${png.toString("base64")}`;
+}
+```
+
+### React + Express.js usage
+
+```typescript:app.ts
+app.get("/api/identicon/:id", (req, res) => {
+  const png = generateIdenticonPng(req.params.id);
+  res.set("Content-Type", "image/png");
+  res.set("Cache-Control", "public, max-age=31536000");
+  res.send(png);
+});
+```
+
+```tsx:profile-image.tsx
+export function UserProfileImage({
+  userId, 
+  className
+}: {
+  userId: string, 
+  className?: string
+}) {
+  return <img src=`/api/identicon/${userId}` className={cn(className, 'size-10 rounded-full')} alt={userId}/>
+}
+```
+
+### Next.js Usage
+```typescript:src/app/api/identicon/[identifier]/route.ts
+export const GET = createIdenticonRouteHandler(
+  8,    // Grid size (3-15 recommended)
+  12,   // Pixel size in px
+  // Your custom color palette 
+  [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', 
+    '#FFA07A', '#98D8C8', '#DDA0DD'
+  ],
+  0.2,  // Padding (0-0.5 recommended)
+  'png' // Format: 'png' | 'svg'
+);
+```
+
+```tsx:src/components/user-avatar.tsx
+import Image from 'next/image';
+
+function UserAvatar({ 
+  userId 
+}: { 
+  userId: string 
+}) {
+  return (
+    <Image
+      src={`/identicon/${encodeURIComponent(userId)}`}
+      alt={`Avatar for ${userId}`}
+      width={64}
+      height={64}
+      className="rounded-full"
+      placeholder="blur"
+      blurDataURL="data:image/jpeg;base64,..."
+    />
+  );
+}
+```
+
+## Lessons Learned
+
+Building kydenticon taught me several valuable lessons:
+
+1. **Zero dependencies is worth the effort** - The complexity of implementing PNG encoding was offset by the simplicity of deployment and reduced security surface area.
+
+2. **TypeScript-first design pays dividends** - Starting with types and working backward to implementation resulted in a cleaner, more maintainable API.
+
+3. **Modern tooling makes a difference** - Bun's integrated approach significantly improved the development experience compared to traditional Node.js toolchains.
+
+4. **Visual algorithms need extensive testing** - Automated tests can verify correctness, but visual inspection is crucial for ensuring the output actually looks good.
+
+## Future Enhancements
+
+The library is functional and stable, but there are several areas for future improvement:
+
+- **Pure JS version** with `pako` and WebCrypto for client-side & edge generation
+- **Additional pattern algorithms** beyond the GitHub style
+- **Animated identicons** using SVG animations
+- **Color accessibility features** for better contrast ratios
+
+## Conclusion
+
+Building kydenticon was an exercise in modern library design - balancing simplicity with flexibility, performance with maintainability, and developer experience with end-user needs. The result is a tool that I genuinely enjoy using in my own projects.
+
+If you're building applications that need user avatars or visual identifiers, give [kydenticon](https://www.npmjs.com/package/kydenticon) a try. It's designed to just work, with sensible defaults and the flexibility to customize when needed.
+
+The source code is available on [GitHub](https://github.com/k-mistele/kydenticon) under the MIT license. Contributions, issues, and feedback are always welcome!
